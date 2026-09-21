@@ -4,6 +4,8 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-09-21
+
 ### Added
 
 - Added scalar tenant work manifests, class-resolved handlers, captured queue
