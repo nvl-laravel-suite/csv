@@ -1,12 +1,12 @@
 # NVL CSV — API and usage
 
-[← NVL Laravel Suite](../../../README.md)
+[← NVL Laravel Suite](https://github.com/nvl-laravel-suite)
 
 ## Quick reference
 
 | Item | Value |
 |---|---|
-| Installed through | `composer require nvl/laravel-suite:^2.0` |
+| Installed through | `composer require nvl/csv:^2.0` |
 | Module identifier | `nvl/csv` |
 | PHP namespace | `Nvl\Csv` |
 | Service provider | `Nvl\Csv\Providers\CsvServiceProvider` |
@@ -25,12 +25,12 @@ The public namespace is `Nvl\Csv`. Its fluent import/export surface is compatibl
 - PHP 8.4 or newer
 - Laravel 13
 - `ext-filter`, `ext-iconv`, `ext-json`, and `ext-mbstring`
-- `nvl/data:^2.0`
+- `nvl/core:^2.0`
 
 Install with Composer:
 
 ```bash
-composer require nvl/laravel-suite:^2.0
+composer require nvl/csv:^2.0
 ```
 
 Laravel discovers `Nvl\Csv\Providers\CsvServiceProvider` automatically. There is no package configuration or migration to publish for synchronous analysis, import, or export.
@@ -254,7 +254,7 @@ The compatibility surface includes:
 - typed enums for delimiter, encoding, export format, processing mode, field type, quality, error level, operation status, duplicate strategy, and notification channel
 - `CSVAnalysisResultData`, `CSVImportOptionsData`, `CSVExportOptionsData`, and `CSVProgressData`
 
-The Data objects are registered with `nvl/data` for generated TypeScript discovery.
+The Data objects are registered with Core's Data provider for generated TypeScript discovery.
 
 ## Agent guidance
 
