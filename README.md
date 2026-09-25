@@ -2,6 +2,9 @@
 
 [← NVL Laravel Suite](https://github.com/nvl-laravel-suite)
 
+For support, [open an issue](https://github.com/nvl-laravel-suite/csv/issues). For vulnerabilities, use
+[private reporting](https://github.com/nvl-laravel-suite/csv/security/advisories/new). See [Contributing](CONTRIBUTING.md).
+
 ## Quick reference
 
 | Item | Value |
@@ -272,8 +275,6 @@ Treat CSV input as untrusted. Enforce upload size, accepted MIME/extension polic
 
 The analyzer samples data and the import result retains failed-row payloads, so consumers processing sensitive or extremely error-prone files should bound source size and error tolerance. Queue batch metadata is operational convenience data rather than durable business state.
 
-## Development and verification
-
 ## Tenant queued imports
 
 Tenant async imports require a class-resolved `CSVRowHandler`; callback-backed
@@ -281,33 +282,17 @@ row, progress, batch, completion, and field transformations are rejected before
 staging. Jobs carry scalar work references plus a captured tenant envelope and
 verify the private manifest and chunk checksums after context restoration.
 
-Run the isolated package tests:
+## Development and verification
+
+From a standalone checkout of the public CSV repository:
 
 ```bash
-vendor/bin/pest \
-  --test-directory=packages/nvl/csv/tests \
-  --configuration=packages/nvl/csv/phpunit.xml.dist \
-  --bootstrap=vendor/autoload.php \
-  --compact \
-  packages/nvl/csv/tests
+composer install
+composer quality
+composer validate --strict
 ```
 
-Run the package quality checks:
-
-```bash
-composer quality --working-dir=packages/nvl/csv
-```
-
-From the monorepo root, also run:
-
-```bash
-vendor/bin/pint --dirty --format agent
-composer packages:analyse
-composer dependencies:check
-composer packages:validate
-```
-
-The package is held to maximum PHPStan strictness, the monorepo's measured line-coverage baseline, and its 90% changed-line coverage requirement.
+Maintainer CI additionally checks package-family contracts, dependency declarations, and measured coverage. The package is held to maximum PHPStan strictness and a 90% changed-line coverage requirement.
 
 ## License
 
