@@ -21,7 +21,7 @@ option. Custom escape settings remain supported.
 Version 1.0 preserves the original class names and public fluent methods under the package namespace.
 
 1. Replace `App\Lib\CSV\...` imports with `Nvl\Csv\...`.
-2. Replace host `App\Traits\DataTransform` assumptions with the package-provided DTO behavior from `nvl/data`; no consumer trait import is required.
+2. Replace host `App\Traits\DataTransform` assumptions with the `Nvl\Data` DTO behavior now provided by `nvl/core`; no consumer trait import is required.
 3. Keep `CSVFieldMapping::withTransformer(...)` as a static factory.
 4. Confirm export paths. Fluent export builders default to the `exports` directory; directly constructed option DTOs without `path` write at the disk root.
 5. Confirm duplicate behavior. `SKIP` and `ERROR` are enforced within the source file; persistence-oriented strategies pass duplicates to the application processor.
