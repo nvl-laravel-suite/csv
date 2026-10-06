@@ -7,6 +7,7 @@ namespace Nvl\Csv\Support;
 use DivisionByZeroError;
 use InvalidArgumentException;
 use Nvl\Csv\Exceptions\CSVMemoryException;
+use Nvl\Support\Facades\PackageLog;
 
 /**
  * Memory management for CSV operations.
@@ -413,7 +414,7 @@ final class CSVMemoryManager
     {
         // This could be extended to log to file or monitoring service
         if (config('app.debug')) {
-            logger()->debug('CSV Memory Usage', $stats);
+            PackageLog::log('csv', 'debug', 'nvl.csv.memory.measured', $stats, 'verbose');
         }
     }
 

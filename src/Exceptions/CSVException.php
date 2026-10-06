@@ -5,12 +5,32 @@ declare(strict_types=1);
 namespace Nvl\Csv\Exceptions;
 
 use Exception;
+use Nvl\Csv\Enums\CSVResponseCode;
+use Nvl\Support\Contracts\RespondableException;
+use Nvl\Support\Exceptions\ExceptionResponse;
+use Nvl\Support\Traits\InteractsWithPackageFailure;
 
 /**
+ * @api
  * Base exception for all CSV-related errors
  */
-abstract class CSVException extends Exception
+abstract class CSVException extends Exception implements RespondableException
 {
+    use InteractsWithPackageFailure;
+
+    /** Resolve the declared safe failure for this native hierarchy. */
+    protected function exceptionResponse(): ExceptionResponse
+    {
+        return match (static::class) {
+            CSVConfigurationException::class => new ExceptionResponse('csv', CSVResponseCode::InvalidConfiguration, 500),
+            CSVMemoryException::class => new ExceptionResponse('csv', CSVResponseCode::MemoryLimitExceeded, 500),
+            CSVFileNotFoundException::class => new ExceptionResponse('csv', CSVResponseCode::FileNotFound, 404),
+            CSVValidationException::class => new ExceptionResponse('csv', CSVResponseCode::InvalidCsvInput, 422),
+            CSVParseException::class => new ExceptionResponse('csv', CSVResponseCode::CsvParseFailed, 422),
+            default => new ExceptionResponse('csv', CSVResponseCode::OperationFailed),
+        };
+    }
+
     /**
      * Additional context data.
      *

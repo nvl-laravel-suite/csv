@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "package": "nvl/csv",
+  "documentation": "docs/events.md",
+  "implementation_status": "implemented; executable acceptance proof pending",
+  "events": [],
+  "value_types": [],
+  "aliases": [],
+  "publication": null,
+  "security_notes": [
+    "This package declares no domain events."
+  ],
+  "no_op_semantics": "No package domain events are declared.",
+  "notes": [],
+  "no_events_reason": "Streaming import/export infrastructure declares no domain events."
+}

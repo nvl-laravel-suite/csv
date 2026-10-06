@@ -5,6 +5,88 @@
         "Nvl\\Csv\\": "src"
     },
     "symbols": {
+        "Nvl\\Csv\\Contracts\\CSVAnalyzerContract": {
+            "kind": "interface",
+            "file": "src/Contracts/CSVAnalyzerContract.php",
+            "methods": [
+                "analyzeFile",
+                "analyzeFromDisk",
+                "quickAnalyze"
+            ],
+            "properties": [],
+            "constants": []
+        },
+        "Nvl\\Csv\\Contracts\\CSVAsyncProcessorContract": {
+            "kind": "interface",
+            "file": "src/Contracts/CSVAsyncProcessorContract.php",
+            "methods": [
+                "cancelBatch",
+                "fromFile",
+                "getBatchStatus",
+                "mapField",
+                "onBatchComplete",
+                "onComplete",
+                "onProgress",
+                "processAsync",
+                "processAsyncWithTracking",
+                "processRow",
+                "usingHandler",
+                "withChunkSize",
+                "withOptions"
+            ],
+            "properties": [],
+            "constants": []
+        },
+        "Nvl\\Csv\\Contracts\\CSVExportContract": {
+            "kind": "interface",
+            "file": "src/Contracts/CSVExportContract.php",
+            "methods": [
+                "chunked",
+                "configure",
+                "disk",
+                "fields",
+                "filename",
+                "fromArray",
+                "fromCollection",
+                "fromQuery",
+                "headings",
+                "path",
+                "stream",
+                "withOptions"
+            ],
+            "properties": [],
+            "constants": []
+        },
+        "Nvl\\Csv\\Contracts\\CSVImportContract": {
+            "kind": "interface",
+            "file": "src/Contracts/CSVImportContract.php",
+            "methods": [
+                "batch",
+                "configure",
+                "detectDuplicates",
+                "fromDisk",
+                "fromFile",
+                "getDuplicateStrategy",
+                "getEncoding",
+                "getProgress",
+                "import",
+                "mapField",
+                "mapFields",
+                "onConnection",
+                "onError",
+                "onProgress",
+                "processRow",
+                "stopOnError",
+                "stream",
+                "withDuplicateStrategy",
+                "withEncoding",
+                "withErrorThreshold",
+                "withOptions",
+                "withTransaction"
+            ],
+            "properties": [],
+            "constants": []
+        },
         "Nvl\\Csv\\Contracts\\CSVRowHandler": {
             "kind": "interface",
             "file": "src/Contracts/CSVRowHandler.php",
@@ -547,6 +629,27 @@
                 "STREAM"
             ]
         },
+        "Nvl\\Csv\\Enums\\CSVResponseCode": {
+            "kind": "enum",
+            "file": "src/Enums/CSVResponseCode.php",
+            "methods": [
+                "cases",
+                "from",
+                "tryFrom"
+            ],
+            "properties": [
+                "name",
+                "value"
+            ],
+            "constants": [
+                "CsvParseFailed",
+                "FileNotFound",
+                "InvalidConfiguration",
+                "InvalidCsvInput",
+                "MemoryLimitExceeded",
+                "OperationFailed"
+            ]
+        },
         "Nvl\\Csv\\Enums\\CSVTypeEnum": {
             "kind": "enum",
             "file": "src/Enums/CSVTypeEnum.php",
@@ -592,7 +695,33 @@
                 "invalidMemoryLimit",
                 "invalidProcessingMode",
                 "missingConfiguration",
+                "package",
+                "publicContext",
+                "responseCode",
+                "responseHeaders",
+                "suggestedStatus",
                 "toArray",
+                "translationKey",
+                "translationParameters",
+                "withContext"
+            ],
+            "properties": [],
+            "constants": []
+        },
+        "Nvl\\Csv\\Exceptions\\CSVException": {
+            "kind": "class",
+            "file": "src/Exceptions/CSVException.php",
+            "methods": [
+                "getContext",
+                "getContextValue",
+                "package",
+                "publicContext",
+                "responseCode",
+                "responseHeaders",
+                "suggestedStatus",
+                "toArray",
+                "translationKey",
+                "translationParameters",
                 "withContext"
             ],
             "properties": [],
@@ -609,8 +738,15 @@
                 "fileNotReadable",
                 "getContext",
                 "getContextValue",
+                "package",
                 "pathNotWritable",
+                "publicContext",
+                "responseCode",
+                "responseHeaders",
+                "suggestedStatus",
                 "toArray",
+                "translationKey",
+                "translationParameters",
                 "withContext"
             ],
             "properties": [],
@@ -627,7 +763,14 @@
                 "getContextValue",
                 "insufficientMemory",
                 "memoryLimitExceeded",
+                "package",
+                "publicContext",
+                "responseCode",
+                "responseHeaders",
+                "suggestedStatus",
                 "toArray",
+                "translationKey",
+                "translationParameters",
                 "withContext"
             ],
             "properties": [],
@@ -646,8 +789,15 @@
                 "invalidHeaders",
                 "invalidStructure",
                 "missingRequiredColumn",
+                "package",
                 "parsingFailed",
+                "publicContext",
+                "responseCode",
+                "responseHeaders",
+                "suggestedStatus",
                 "toArray",
+                "translationKey",
+                "translationParameters",
                 "withContext"
             ],
             "properties": [],
@@ -667,9 +817,16 @@
                 "getValidationErrors",
                 "invalidType",
                 "missingRequiredFields",
+                "package",
+                "publicContext",
                 "requiredFieldMissing",
+                "responseCode",
+                "responseHeaders",
                 "rowValidationFailed",
+                "suggestedStatus",
                 "toArray",
+                "translationKey",
+                "translationParameters",
                 "validationFailed",
                 "withContext"
             ],

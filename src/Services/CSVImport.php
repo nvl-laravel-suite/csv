@@ -12,6 +12,7 @@ use Exception;
 use Generator;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
+use Nvl\Csv\Contracts\CSVImportContract;
 use Nvl\Csv\Data\CSVImportOptionsData;
 use Nvl\Csv\Data\CSVProgressData;
 use Nvl\Csv\Enums\CSVDuplicateStrategyEnum;
@@ -48,7 +49,7 @@ use Throwable;
  *
  * @api
  */
-final class CSVImport
+final class CSVImport implements CSVImportContract
 {
     private const MAX_RETAINED_FAILURES = 1000;
 

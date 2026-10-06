@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use JsonException;
+use Nvl\Csv\Contracts\CSVAsyncProcessorContract;
 use Nvl\Csv\Data\CSVImportOptionsData;
 use Nvl\Csv\Jobs\ProcessCSVChunkJob;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
@@ -36,7 +37,7 @@ use Throwable;
  *
  * @api
  */
-final class CSVAsyncProcessor
+final class CSVAsyncProcessor implements CSVAsyncProcessorContract
 {
     private ?CSVImportOptionsData $options = null;
 

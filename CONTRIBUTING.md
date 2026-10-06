@@ -1,13 +1,5 @@
-# Contributing to NVL CSV
+# Contributing
 
-This public repository is a publication mirror of private source. Open an issue
-here for a bug or proposal; include a reproduction and, if helpful, a patch.
-Maintainers apply accepted changes in source and publish a mirror release.
-Direct mirror pull requests do not update source. See the
-[organization contribution guide](https://github.com/nvl-laravel-suite/.github/blob/main/CONTRIBUTING.md).
+This repository is a read-only release mirror. Pull requests to the mirror are not accepted. Open a public issue with a reproducible example or a proposed patch. Maintainers apply reviewed changes in the private source repository and publish immutable releases from there.
 
-Changes must preserve the package’s headless, transport-neutral CSV boundary and the established `Nvl\Csv` public API.
-
-Add Pest coverage for quoted delimiters, embedded newlines, headerless files, uneven rows, BOM variants, non-UTF-8 encodings, remote filesystem streams, DTO options, validation, transformations, duplicate policies, transaction outcomes, bounded memory behavior, serialized jobs, cancellation, and failed batches. Do not add application models, host namespaces, routes, or business-specific persistence.
-
-Run Pint, PHPStan at maximum strictness, the isolated Pest suite, Composer validation, dependency analysis, generated TypeScript verification, package-family validation, and the monorepo coverage gate. New public behavior requires accurate README and upgrading guidance.
+Report vulnerabilities privately through the [security policy](https://github.com/nvl-laravel-suite/csv/security/policy). Public issues must not contain undisclosed vulnerability details.

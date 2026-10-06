@@ -12,7 +12,6 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use JsonException;
 use Laravel\SerializableClosure\SerializableClosure;
@@ -23,6 +22,7 @@ use Nvl\Csv\Services\CSVWorkStore;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
 use Nvl\Csv\ValueObjects\CSVWorkReference;
 use Nvl\Support\Config\PackageOptions;
+use Nvl\Support\Facades\PackageLog;
 use Nvl\Support\Tenancy\Contracts\TenantQueuedJob;
 use Nvl\Support\Tenancy\Enums\TenantContextMode;
 use Nvl\Support\Tenancy\Exceptions\TenantBoundaryViolation;
@@ -199,10 +199,11 @@ final class ProcessCSVChunkJob implements ShouldQueue, TenantQueuedJob
         $failedRows = 0;
         $errors = [];
 
-        Log::info("Processing CSV chunk {$this->chunkIndex}", [
+        PackageLog::log('csv', 'debug', 'nvl.csv.chunk.started', [
+            'chunk_index' => $this->chunkIndex,
             'chunk_size' => count($chunkData),
             'batch_id' => $this->batch()?->id,
-        ]);
+        ], 'verbose');
 
         try {
             foreach ($chunkData as $rowInfo) {
@@ -233,11 +234,20 @@ final class ProcessCSVChunkJob implements ShouldQueue, TenantQueuedJob
                         'data' => $rowInfo['data'],
                     ];
 
-                    Log::warning("Failed to process row {$rowInfo['row_number']}", [
-                        'error' => $e->getMessage(),
+                    PackageLog::log('csv', 'debug', 'nvl.csv.row.failed', [
+                        'row_number' => $rowInfo['row_number'],
+                        'exception' => $e::class,
                         'chunk_index' => $this->chunkIndex,
-                    ]);
+                    ], 'verbose');
                 }
+            }
+
+            if ($failedRows > 0) {
+                PackageLog::log('csv', 'warning', 'nvl.csv.chunk.rows_failed', [
+                    'chunk_index' => $this->chunkIndex,
+                    'processed_rows' => $processedRows,
+                    'failed_rows' => $failedRows,
+                ], 'quiet');
             }
 
             $processingTime = microtime(true) - $startTime;
@@ -248,22 +258,23 @@ final class ProcessCSVChunkJob implements ShouldQueue, TenantQueuedJob
                 ($this->batchCallback)($this->chunkIndex, $processedRows, $errors);
             }
 
-            Log::info("Completed CSV chunk {$this->chunkIndex}", [
+            PackageLog::log('csv', 'info', 'nvl.csv.chunk.completed', [
+                'chunk_index' => $this->chunkIndex,
                 'processed_rows' => $processedRows,
                 'failed_rows' => $failedRows,
                 'processing_time' => round($processingTime, 3),
                 'rows_per_second' => $processingTime > 0 ? round($processedRows / $processingTime) : 0,
-            ]);
+            ], 'normal');
 
             $this->deleteStoredChunk();
             if ($workStore !== null) {
                 $this->deleteTenantChunk($workStore);
             }
         } catch (Throwable $e) {
-            Log::error("Critical error processing CSV chunk {$this->chunkIndex}", [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
+            PackageLog::log('csv', 'error', 'nvl.csv.chunk.failed', [
+                'exception' => $e::class,
+                'chunk_index' => $this->chunkIndex,
+            ], 'quiet');
 
             throw $e;
         }
@@ -276,12 +287,12 @@ final class ProcessCSVChunkJob implements ShouldQueue, TenantQueuedJob
      */
     public function failed(?Throwable $exception): void
     {
-        Log::error('CSV chunk job failed', [
+        PackageLog::log('csv', 'error', 'nvl.csv.job.failed', [
+            'exception' => $exception === null ? null : $exception::class,
             'chunk_index' => $this->chunkIndex,
             'batch_id' => $this->batch()?->id,
-            'error' => $exception?->getMessage() ?? 'Unknown queue failure.',
             'chunk_size' => count($this->chunkData),
-        ]);
+        ], 'quiet');
 
         $this->deleteStoredChunk();
     }

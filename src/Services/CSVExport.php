@@ -15,6 +15,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
 use JsonException;
+use Nvl\Csv\Contracts\CSVExportContract;
 use Nvl\Csv\Data\CSVExportOptionsData;
 use Nvl\Csv\Exceptions\CSVConfigurationException;
 use Nvl\Csv\Exceptions\CSVMemoryException;
@@ -35,7 +36,7 @@ use Throwable;
  *
  * @api
  */
-final class CSVExport
+final class CSVExport implements CSVExportContract
 {
     private CSVConfiguration $configuration;
 

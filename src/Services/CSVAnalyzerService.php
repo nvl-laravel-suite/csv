@@ -8,6 +8,7 @@ use Carbon\Carbon;
 use DivisionByZeroError;
 use Exception;
 use Illuminate\Support\Facades\Storage;
+use Nvl\Csv\Contracts\CSVAnalyzerContract;
 use Nvl\Csv\Data\CSVAnalysisResultData;
 use Nvl\Csv\Enums\CSVDataQualityEnum;
 use Nvl\Csv\Enums\CSVDelimiterEnum;
@@ -23,7 +24,7 @@ use RuntimeException;
  *
  * @api
  */
-final class CSVAnalyzerService
+final class CSVAnalyzerService implements CSVAnalyzerContract
 {
     private const SAMPLE_SIZE = 100;
 
