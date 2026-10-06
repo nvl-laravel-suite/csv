@@ -22,6 +22,7 @@ use Nvl\Csv\Services\CSVHandlerRegistry;
 use Nvl\Csv\Services\CSVWorkStore;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
 use Nvl\Csv\ValueObjects\CSVWorkReference;
+use Nvl\Support\Config\PackageOptions;
 use Nvl\Support\Tenancy\Contracts\TenantQueuedJob;
 use Nvl\Support\Tenancy\Enums\TenantContextMode;
 use Nvl\Support\Tenancy\Exceptions\TenantBoundaryViolation;
@@ -94,7 +95,8 @@ final class ProcessCSVChunkJob implements ShouldQueue, TenantQueuedJob
         $this->envelope = $envelope ?? new TenantJobEnvelope(new TenantContextSnapshot(TenantContextMode::Disabled));
         $this->serializedRowProcessor = $rowProcessor === null ? null : new SerializableClosure($rowProcessor);
         $this->serializedBatchCallback = $batchCallback === null ? null : new SerializableClosure($batchCallback);
-        $this->onQueue('csv-processing');
+        $this->onConnection(PackageOptions::queueConnection('csv'));
+        $this->onQueue(PackageOptions::queueName('csv'));
     }
 
     /** Create a scalar-reference tenant job without serializing rows or callbacks. */

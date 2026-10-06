@@ -11,7 +11,7 @@ See the [installation and publishing guide](https://github.com/nvl-laravel-suite
 
 | Item | Value |
 |---|---|
-| Installed through | `composer require nvl/csv:^2.0` |
+| Installed through | `composer require nvl/csv:^5.0` |
 | Module identifier | `nvl/csv` |
 | PHP namespace | `Nvl\Csv` |
 | Service provider | `Nvl\Csv\Providers\CsvServiceProvider` |
@@ -30,12 +30,12 @@ The public namespace is `Nvl\Csv`. Its fluent import/export surface is compatibl
 - PHP 8.4 or newer
 - Laravel 13
 - `ext-filter`, `ext-iconv`, `ext-json`, and `ext-mbstring`
-- `nvl/core:^2.0`
+- `nvl/core:^5.0`
 
 Install with Composer:
 
 ```bash
-composer require nvl/csv:^2.0
+composer require nvl/csv:^5.0
 ```
 
 Laravel discovers `Nvl\Csv\Providers\CsvServiceProvider` automatically. There is no package configuration or migration to publish for synchronous analysis, import, or export.
@@ -47,7 +47,7 @@ php artisan make:queue-batches-table
 php artisan migrate
 ```
 
-Keep the queue connection’s `retry_after` value above the job timeout of 300 seconds. Async jobs use the `csv-processing` queue and stage bounded JSON chunks on the application’s `local` filesystem disk until the job completes, is cancelled, or exhausts its retries.
+Keep the queue connection’s `retry_after` value above the job timeout of 300 seconds. Async jobs resolve `nvl-csv.queue.connection` and `nvl-csv.queue.name` first, then Core queue defaults, then the selected Laravel connection and queue. Explicit `sync` is preserved. Jobs stage bounded JSON chunks on the application’s `local` filesystem disk until the job completes, is cancelled, or exhausts its retries.
 
 ## Analyze a file
 
@@ -266,7 +266,7 @@ The Data objects are registered with Core's Data provider for generated TypeScri
 Publish the bundled Laravel Boost skill when the consumer wants repository-local guidance:
 
 ```bash
-php artisan vendor:publish --tag=csv-skills
+php artisan vendor:publish --tag=nvl-csv-skills
 ```
 
 This publishes `nvl-csv` into the application’s `.agents/skills` directory.

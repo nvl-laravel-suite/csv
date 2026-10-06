@@ -14,6 +14,7 @@ use Nvl\Data\Services\TypeScriptSourceRegistry;
 use Nvl\Support\Providers\TenantServiceProvider;
 use Nvl\Support\Tenancy\Contracts\TenantContext;
 use Nvl\Support\Tenancy\Contracts\TenantQueueContext;
+use Nvl\Support\Traits\RegistersNamespacedResources;
 use Nvl\Tenancy\Services\TenantAdoptionRegistry;
 
 /**
@@ -21,6 +22,8 @@ use Nvl\Tenancy\Services\TenantAdoptionRegistry;
  */
 final class CsvServiceProvider extends ServiceProvider
 {
+    use RegistersNamespacedResources;
+
     public function register(): void
     {
         $this->app->register(TenantServiceProvider::class);

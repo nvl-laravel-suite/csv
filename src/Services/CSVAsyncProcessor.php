@@ -17,6 +17,7 @@ use Nvl\Csv\Data\CSVImportOptionsData;
 use Nvl\Csv\Jobs\ProcessCSVChunkJob;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
 use Nvl\Csv\ValueObjects\CSVWorkReference;
+use Nvl\Support\Config\PackageOptions;
 use Nvl\Support\Tenancy\Contracts\TenantContext;
 use Nvl\Support\Tenancy\Contracts\TenantQueueContext;
 use Nvl\Support\Tenancy\Enums\TenantContextMode;
@@ -235,7 +236,8 @@ final class CSVAsyncProcessor
         $batch = Bus::batch($jobs)
             ->name('CSV Processing: '.basename($this->filePath))
             ->allowFailures()
-            ->onQueue('csv-processing');
+            ->onConnection(PackageOptions::queueConnection('csv'))
+            ->onQueue(PackageOptions::queueName('csv'));
 
         if ($this->progressCallback !== null) {
             $batch->progress($this->progressCallback);
@@ -286,7 +288,8 @@ final class CSVAsyncProcessor
             $this->handlerVersion,
         );
         $staged = $this->createTenantJobs($work, TenantJobEnvelope::capture($this->context));
-        $pending = Bus::batch($staged)->name('Tenant CSV Processing: '.$workId)->allowFailures()->onQueue('csv-processing');
+        $pending = Bus::batch($staged)->name('Tenant CSV Processing: '.$workId)->allowFailures()->onConnection(PackageOptions::queueConnection('csv'))
+            ->onQueue(PackageOptions::queueName('csv'));
 
         try {
             return $this->queueContext->captureBatch($pending)->dispatch();
@@ -637,7 +640,7 @@ final class CSVAsyncProcessor
 
     private function tenantEnabled(): bool
     {
-        return (bool) config('tenancy.enabled', false)
+        return (bool) config('nvl-tenancy.enabled', false)
             || ($this->context !== null && $this->context->snapshot()->mode !== TenantContextMode::Disabled);
     }
 

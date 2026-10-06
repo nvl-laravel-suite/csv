@@ -8,7 +8,7 @@ use Nvl\Csv\Services\CSVAsyncProcessor;
 use Nvl\Tenancy\Exceptions\TenantBoundaryViolation;
 
 test('tenant csv refuses arbitrary serialized callbacks before staging', function (): void {
-    Config::set('tenancy.enabled', true);
+    Config::set('nvl-tenancy.enabled', true);
     Storage::fake('local');
     $processor = CSVAsyncProcessor::make();
 

@@ -4,6 +4,13 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- Prepare lockstep major 5 with required and development NVL peer floors of `^5.0`. This candidate has not been tagged or published.
+- Inherit queue connection and destination from package options, Core defaults and Laravel.
+- Keep CSV processing behavior unchanged apart from infrastructure composition and the lockstep major.
+- Review [UPGRADING.md](UPGRADING.md) before adopting the new names and infrastructure boundaries.
+
 ## [2.2.1] - 2026-09-26
 
 ### Documentation

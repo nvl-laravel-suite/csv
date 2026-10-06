@@ -41,3 +41,9 @@ Test quoted delimiters, embedded newlines, BOMs, non-UTF-8 encodings, empty file
 - Preserve disabled compatibility and package independence; tenant support never creates an undeclared Auth or Suite dependency.
 - Use registered package-owned resources, adoption adapters, Actions, and lifecycle APIs. Never add a generic tenant delete-all path or raw cross-package cleanup.
 - Treat mapping/configuration hashes, interruption checkpoints, conservation evidence, worker context, tenant-leading queries, and standalone consumption as release contracts.
+
+## Canonical configuration ownership
+
+- This package does not ship a package config file or package environment variables. Configure behavior through its typed APIs; do not invent a `nvl-csv` config root.
+- When composing configured NVL packages, use their shipped canonical `nvl-<package>` roots and `NVL_<PACKAGE>_*` inputs. Core's generic config/environment compatibility is default off and applies only to explicitly selected historical inputs.
+- Keep logical package/tenant resource identifiers unchanged and use the package's canonical skill publication tag. Preserve host global registrations.
