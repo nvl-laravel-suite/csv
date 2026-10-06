@@ -33,6 +33,8 @@ use Throwable;
  * asynchronously using Laravel's queue system with batching support.
  * Ideal for files with 100,000+ rows that would exceed memory limits
  * or time limits in synchronous processing.
+ *
+ * @api
  */
 final class CSVAsyncProcessor
 {

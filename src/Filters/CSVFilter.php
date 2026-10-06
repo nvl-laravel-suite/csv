@@ -6,6 +6,8 @@ namespace Nvl\Csv\Filters;
 
 /**
  * Base filter for CSV row filtering.
+ *
+ * @api
  */
 abstract class CSVFilter
 {

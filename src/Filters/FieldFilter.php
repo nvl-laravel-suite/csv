@@ -9,6 +9,8 @@ use LogicException;
 
 /**
  * Filter based on field values.
+ *
+ * @api
  */
 final class FieldFilter extends CSVFilter
 {

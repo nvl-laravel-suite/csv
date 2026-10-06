@@ -12,6 +12,8 @@ namespace Nvl\Csv\Enums;
  * - Guide import strategy decisions
  * - Set quality thresholds for automated processing
  * - Generate quality reports and recommendations
+ *
+ * @api
  */
 enum CSVDataQualityEnum: string
 {

@@ -6,6 +6,8 @@ namespace Nvl\Csv\Filters;
 
 /**
  * Combines multiple filters with OR logic.
+ *
+ * @api
  */
 final class OrFilter extends CSVFilter
 {

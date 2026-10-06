@@ -9,6 +9,8 @@ use Stringable;
 
 /**
  * Numeric transformation utilities for CSV data.
+ *
+ * @api
  */
 final class NumericTransformer extends CSVTransformer
 {

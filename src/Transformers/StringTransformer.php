@@ -10,6 +10,8 @@ use Stringable;
 
 /**
  * String transformation utilities for CSV data.
+ *
+ * @api
  */
 final class StringTransformer extends CSVTransformer
 {

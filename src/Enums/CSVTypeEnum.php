@@ -15,6 +15,8 @@ use Stringable;
  *
  * Provides type-safe column casting with built-in validation for common data types.
  * Supports both standard and nullable variants for flexible data handling.
+ *
+ * @api
  */
 enum CSVTypeEnum: string
 {

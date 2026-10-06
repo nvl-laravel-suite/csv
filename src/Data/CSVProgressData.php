@@ -25,6 +25,8 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScriptType;
  *
  * Provides comprehensive status and metrics for ongoing CSV import/export operations,
  * enabling progress bars, status updates, and performance monitoring.
+ *
+ * @api
  */
 #[MapOutputName(CamelCaseMapper::class)]
 #[MapInputName(CamelCaseMapper::class)]

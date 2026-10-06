@@ -19,6 +19,8 @@ use Nvl\Csv\Enums\CSVTypeEnum;
  * - Validation rules with detailed error reporting
  * - Uniqueness constraints and indexing hints
  * - Nullable and required field constraints
+ *
+ * @api
  */
 final readonly class CSVFieldMapping
 {

@@ -12,6 +12,8 @@ use Illuminate\Support\Facades\Storage;
  *
  * Contains all information about a completed CSV export operation,
  * including file path, statistics, and metadata.
+ *
+ * @api
  */
 final readonly class CSVExportResult
 {

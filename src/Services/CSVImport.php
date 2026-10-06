@@ -45,6 +45,8 @@ use Throwable;
  * - Progress tracking
  * - Error recovery
  * - Duplicate detection
+ *
+ * @api
  */
 final class CSVImport
 {

@@ -11,6 +11,8 @@ namespace Nvl\Csv\Enums;
  * - Character encodings and BOM handling
  * - Platform-specific line endings
  * - Application-compatible delimiter/enclosure patterns
+ *
+ * @api
  */
 enum CSVExportFormatEnum: string
 {

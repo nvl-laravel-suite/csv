@@ -12,6 +12,8 @@ namespace Nvl\Csv\Enums;
  * - Legacy encodings for backward compatibility
  * - Asian language encodings (Japanese, Chinese, Korean)
  * - Windows and ISO encodings for European languages
+ *
+ * @api
  */
 enum CSVEncodingEnum: string
 {

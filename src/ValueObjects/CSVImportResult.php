@@ -11,6 +11,8 @@ use Carbon\Carbon;
  *
  * Contains comprehensive information about a completed CSV import operation,
  * including statistics, errors, warnings, and processing details.
+ *
+ * @api
  */
 final readonly class CSVImportResult
 {

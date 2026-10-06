@@ -6,6 +6,8 @@ namespace Nvl\Csv\Exceptions;
 
 /**
  * Exception for CSV file not found errors
+ *
+ * @api
  */
 final class CSVFileNotFoundException extends CSVException
 {

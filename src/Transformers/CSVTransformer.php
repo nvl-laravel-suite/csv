@@ -13,6 +13,8 @@ namespace Nvl\Csv\Transformers;
  *
  * Transformers can be chained together for complex multi-step transformations
  * or made conditional based on runtime criteria.
+ *
+ * @api
  */
 abstract class CSVTransformer
 {

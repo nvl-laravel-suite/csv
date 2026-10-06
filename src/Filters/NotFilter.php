@@ -6,6 +6,8 @@ namespace Nvl\Csv\Filters;
 
 /**
  * Inverts the logic of another filter.
+ *
+ * @api
  */
 final class NotFilter extends CSVFilter
 {

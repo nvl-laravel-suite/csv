@@ -24,6 +24,8 @@ use Spatie\TypeScriptTransformer\Attributes\TypeScriptType;
  *
  * Provides detailed insights into CSV file structure, data quality,
  * and optimization recommendations for import/export operations.
+ *
+ * @api
  */
 #[MapOutputName(CamelCaseMapper::class)]
 #[MapInputName(CamelCaseMapper::class)]

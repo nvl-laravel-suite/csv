@@ -8,6 +8,8 @@ use Closure;
 
 /**
  * Custom filter using a callback function.
+ *
+ * @api
  */
 final class CustomFilter extends CSVFilter
 {

@@ -12,6 +12,8 @@ namespace Nvl\Csv\Enums;
  * - Support pause/resume for large operations
  * - Enable retry logic for failed operations
  * - Facilitate progress monitoring and reporting
+ *
+ * @api
  */
 enum CSVOperationStatusEnum: string
 {

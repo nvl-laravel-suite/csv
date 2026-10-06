@@ -6,6 +6,8 @@ namespace Nvl\Csv\Exceptions;
 
 /**
  * Exception for CSV validation errors
+ *
+ * @api
  */
 final class CSVValidationException extends CSVException
 {

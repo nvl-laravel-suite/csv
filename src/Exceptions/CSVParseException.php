@@ -6,6 +6,8 @@ namespace Nvl\Csv\Exceptions;
 
 /**
  * Exception for CSV parsing errors
+ *
+ * @api
  */
 final class CSVParseException extends CSVException
 {

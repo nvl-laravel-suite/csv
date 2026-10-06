@@ -10,6 +10,8 @@ namespace Nvl\Csv\Enums;
  * Provides type-safe delimiter selection for CSV parsing and generation.
  * Each enum case maps to its corresponding character and provides
  * helpful utilities for file handling and user interfaces.
+ *
+ * @api
  */
 enum CSVDelimiterEnum: string
 {

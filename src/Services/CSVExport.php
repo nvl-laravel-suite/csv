@@ -32,6 +32,8 @@ use Throwable;
  * @throws CSVConfigurationException
  * @throws CSVMemoryException
  * @throws RuntimeException
+ *
+ * @api
  */
 final class CSVExport
 {

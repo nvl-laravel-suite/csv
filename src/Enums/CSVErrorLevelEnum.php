@@ -12,6 +12,8 @@ namespace Nvl\Csv\Enums;
  * - Guides notification and logging strategies
  * - Enables configurable error tolerance
  * - Supports detailed error reporting and analytics
+ *
+ * @api
  */
 enum CSVErrorLevelEnum: string
 {

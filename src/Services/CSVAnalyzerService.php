@@ -20,6 +20,8 @@ use RuntimeException;
  *
  * Analyzes CSV files to detect structure, encoding, data quality,
  * and provides recommendations for optimal processing strategies.
+ *
+ * @api
  */
 final class CSVAnalyzerService
 {

@@ -12,6 +12,8 @@ namespace Nvl\Csv\Enums;
  * - Support various business rules for duplicates
  * - Enable flexible import strategies
  * - Maintain data integrity and consistency
+ *
+ * @api
  */
 enum CSVDuplicateStrategyEnum: string
 {

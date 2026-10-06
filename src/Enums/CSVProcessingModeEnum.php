@@ -11,6 +11,8 @@ namespace Nvl\Csv\Enums;
  * - Memory modes for small files requiring fast access
  * - Streaming modes for large files with memory constraints
  * - Batch/Queue modes for background processing of huge datasets
+ *
+ * @api
  */
 enum CSVProcessingModeEnum: string
 {

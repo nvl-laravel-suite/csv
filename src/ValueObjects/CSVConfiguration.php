@@ -21,6 +21,8 @@ use Nvl\Csv\Exceptions\CSVConfigurationException;
  * - Processing mode: memory vs streaming vs chunked processing
  * - Output options: headers, BOM, encoding
  * - Performance tuning: chunk size, memory limits
+ *
+ * @api
  */
 final readonly class CSVConfiguration
 {

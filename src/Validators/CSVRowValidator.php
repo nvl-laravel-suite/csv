@@ -9,6 +9,8 @@ use Nvl\Csv\ValueObjects\CSVFieldMapping;
 
 /**
  * Validates entire CSV rows with multiple field rules.
+ *
+ * @api
  */
 final class CSVRowValidator extends CSVValidator
 {

@@ -6,6 +6,8 @@ namespace Nvl\Csv\Exceptions;
 
 /**
  * Exception for CSV configuration errors
+ *
+ * @api
  */
 final class CSVConfigurationException extends CSVException
 {

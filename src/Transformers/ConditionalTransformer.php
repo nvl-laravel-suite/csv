@@ -8,6 +8,8 @@ use Closure;
 
 /**
  * Applies transformation conditionally.
+ *
+ * @api
  */
 final class ConditionalTransformer extends CSVTransformer
 {

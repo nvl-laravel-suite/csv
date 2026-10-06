@@ -6,6 +6,8 @@ namespace Nvl\Csv\Filters;
 
 /**
  * Combines multiple filters with AND logic.
+ *
+ * @api
  */
 final class AndFilter extends CSVFilter
 {

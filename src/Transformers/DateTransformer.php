@@ -18,6 +18,8 @@ use Stringable;
  * - Date arithmetic (add/subtract days, months, years)
  * - Time-of-day adjustments (start/end of day)
  * - Robust error handling with configurable defaults
+ *
+ * @api
  */
 final class DateTransformer extends CSVTransformer
 {

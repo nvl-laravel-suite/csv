@@ -6,6 +6,8 @@ namespace Nvl\Csv\Transformers;
 
 /**
  * Chains multiple transformers together.
+ *
+ * @api
  */
 final class ChainedTransformer extends CSVTransformer
 {

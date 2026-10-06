@@ -11,6 +11,8 @@ use Nvl\Csv\Enums\CSVTypeEnum;
 
 /**
  * Validates individual CSV fields with type checking and rules.
+ *
+ * @api
  */
 final class CSVFieldValidator extends CSVValidator
 {

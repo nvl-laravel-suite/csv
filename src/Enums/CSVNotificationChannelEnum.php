@@ -10,6 +10,8 @@ namespace Nvl\Csv\Enums;
  * Defines available communication channels for sending notifications about
  * CSV import/export operations, including progress updates, error alerts,
  * and completion notifications.
+ *
+ * @api
  */
 enum CSVNotificationChannelEnum: string
 {
