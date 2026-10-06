@@ -7,8 +7,8 @@ namespace Nvl\Csv\Services;
 use Illuminate\Support\Facades\Storage;
 use JsonException;
 use Nvl\Csv\ValueObjects\CSVWorkReference;
-use Nvl\Tenancy\Contracts\TenantContext;
-use Nvl\Tenancy\Exceptions\TenantBoundaryViolation;
+use Nvl\Support\Tenancy\Contracts\TenantContext;
+use Nvl\Support\Tenancy\Exceptions\TenantBoundaryViolation;
 use RuntimeException;
 
 /** Owns bounded JSON manifests and verifies their exact tenant/work identity. */

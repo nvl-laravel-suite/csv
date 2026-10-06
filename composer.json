@@ -3,7 +3,14 @@
     "description": "Typed, memory-conscious CSV analysis, validation, transformation, import, export, and queued processing for Laravel",
     "type": "library",
     "license": "MIT",
-    "keywords": ["laravel", "csv", "import", "export", "validation", "queue"],
+    "keywords": [
+        "laravel",
+        "csv",
+        "import",
+        "export",
+        "validation",
+        "queue"
+    ],
     "require": {
         "php": "^8.3",
         "ext-filter": "*",
@@ -14,7 +21,6 @@
         "laravel/serializable-closure": "^2.0.10",
         "nesbot/carbon": "^2.72 || ^3.0",
         "nvl/core": "^2.0",
-        "nvl/tenancy": "^2.0",
         "spatie/laravel-data": "^4.23",
         "spatie/typescript-transformer": "^3.3"
     },
@@ -22,6 +28,7 @@
         "larastan/larastan": "^3.10",
         "laravel/pint": "^1.27",
         "mockery/mockery": "^1.6",
+        "nvl/tenancy": "^2.0",
         "orchestra/testbench": "^11.0",
         "pestphp/pest": "^4.0",
         "pestphp/pest-plugin-laravel": "^4.0"
@@ -77,5 +84,8 @@
         ]
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "suggest": {
+        "nvl/tenancy": "Enables enforcing tenant ownership, scoped execution, adoption, and captured tenant queue contexts."
+    }
 }

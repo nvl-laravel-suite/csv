@@ -11,10 +11,10 @@ use Nvl\Csv\Services\CSVHandlerRegistry;
 use Nvl\Csv\Services\CSVWorkStore;
 use Nvl\Csv\Tenancy\CsvAdoptionAdapter;
 use Nvl\Data\Services\TypeScriptSourceRegistry;
-use Nvl\Tenancy\Contracts\TenantContext;
-use Nvl\Tenancy\Providers\TenancyServiceProvider;
+use Nvl\Support\Providers\TenantServiceProvider;
+use Nvl\Support\Tenancy\Contracts\TenantContext;
+use Nvl\Support\Tenancy\Contracts\TenantQueueContext;
 use Nvl\Tenancy\Services\TenantAdoptionRegistry;
-use Nvl\Tenancy\Services\TenantQueueContext;
 
 /**
  * Registers generated TypeScript discovery and publishable agent guidance.
@@ -23,8 +23,12 @@ final class CsvServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->app->register(TenancyServiceProvider::class);
-        $this->app->make(TenantAdoptionRegistry::class)->register('csv', CsvAdoptionAdapter::class);
+        $this->app->register(TenantServiceProvider::class);
+        $this->app->booted(function (): void {
+            if ($this->app->bound(TenantAdoptionRegistry::class)) {
+                $this->app->make(TenantAdoptionRegistry::class)->register('csv', CsvAdoptionAdapter::class);
+            }
+        });
         $this->app->singleton(CSVHandlerRegistry::class);
         $this->app->bind(CSVAsyncProcessor::class, fn (Container $app): CSVAsyncProcessor => new CSVAsyncProcessor(
             $app->make(TenantContext::class),
