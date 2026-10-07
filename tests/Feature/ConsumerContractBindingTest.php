@@ -86,11 +86,13 @@ test('published workflow contracts retain native signatures attributes and gener
             expect($native->isPublic())->toBeTrue()
                 ->and($native->isStatic())->toBeFalse()
                 ->and(count($method->getParameters()))->toBe(count($native->getParameters()));
-            if ($return !== 'self') {
+            if (! in_array($return, ['self', $method->getDeclaringClass()->getName()], true)) {
                 expect((string) $native->getReturnType())->toBe($return);
             } else {
                 $nativeReturn = (string) $native->getReturnType();
-                expect(is_a(in_array($nativeReturn, ['self', 'static'], true) ? $native->getDeclaringClass()->getName() : $nativeReturn, $contract, true))->toBeTrue();
+                expect($native->getReturnType())->toBeInstanceOf(ReflectionNamedType::class)
+                    ->and($native->getReturnType()->allowsNull())->toBe($method->getReturnType()->allowsNull())
+                    ->and(is_a(in_array($nativeReturn, ['self', 'static'], true) ? $native->getDeclaringClass()->getName() : $nativeReturn, $contract, true))->toBeTrue();
             }
             foreach ($method->getParameters() as $position => $parameter) {
                 $actual = $native->getParameters()[$position];
