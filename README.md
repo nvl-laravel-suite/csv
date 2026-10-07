@@ -40,7 +40,7 @@ See the [installation and publishing guide](https://github.com/nvl-laravel-suite
 | Service provider | `Nvl\Csv\Providers\CsvServiceProvider` |
 | Configuration | None; behavior is supplied through typed options and services |
 
-Typed, memory-conscious CSV analysis, validation, transformation, import, export, and queued chunk processing for Laravel 13.
+Typed, memory-conscious CSV analysis, validation, transformation, import, export, and queued chunk processing for Laravel 12–13.
 
 ## Purpose
 
@@ -51,7 +51,7 @@ The public namespace is `Nvl\Csv`. Its fluent import/export surface is compatibl
 ## Requirements and installation
 
 - PHP 8.4 or newer
-- Laravel 13
+- Laravel 12–13
 - `ext-filter`, `ext-iconv`, `ext-json`, and `ext-mbstring`
 - `nvl/core:^5.0`
 
