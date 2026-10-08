@@ -3,13 +3,15 @@
 
 All notable changes to `nvl/csv` are documented here.
 
-## [5.0.0] — release candidate (unpublished)
+## [Unreleased]
+
+## [5.0.0] - 2026-10-08
 
 ### Changed
 
 - The four CSV service interfaces copy the native public instance methods (3 analyzer, 22 import, 12 export, 13 async). Mutable defaults remain transient; static factories and direct constructors remain callable. Document contract substitution and truthful host fixtures in Testing your app.
 - Classify the supported consumer PHP surface with explicit source annotations and restrict package model handles to declared identity and in-memory read fields; preserve existing workflow behavior and concrete signatures.
-- Prepare lockstep major 5 with required and development NVL peer floors of `^5.0`. This candidate has not been tagged or published.
+- Adopt lockstep major 5 with required and development NVL peer floors of `^5.0`.
 - Inherit queue connection and destination from package options, Core defaults and Laravel.
 - Keep CSV processing behavior unchanged apart from infrastructure composition and the lockstep major.
 - Review [UPGRADING.md](UPGRADING.md) before adopting the new names and infrastructure boundaries.
