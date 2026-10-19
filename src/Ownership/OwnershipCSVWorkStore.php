@@ -6,17 +6,17 @@ namespace Nvl\Csv\Ownership;
 
 use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\ValueObjects\CSVWorkReference;
-use Nvl\Support\Ownership\Contracts\OwnershipContext;
 use Nvl\Support\Ownership\Contracts\OwnershipQueueContext;
 use Nvl\Support\Ownership\Enums\OwnershipContextMode;
 use Nvl\Support\Ownership\Exceptions\OwnershipViolation;
+use Nvl\Support\Ownership\Services\OwnershipContextResolver;
 use Nvl\Support\Ownership\ValueObjects\OwnershipJobEnvelope;
 use RuntimeException;
 
 /** Protects private JSON manifests by exact producer boundary, canonical path and content identity. @internal */
 final readonly class OwnershipCSVWorkStore
 {
-    public function __construct(private OwnershipContext $context, private OwnershipQueueContext $queue) {}
+    public function __construct(private OwnershipContextResolver $context, private OwnershipQueueContext $queue) {}
 
     /** @param array<string,mixed> $manifest */
     public function write(CSVWorkReference $work, array $manifest): string
@@ -78,7 +78,7 @@ final readonly class OwnershipCSVWorkStore
     private function assertReference(CSVWorkReference $work): void
     {
         $envelope = $work->ownership ?? throw new OwnershipViolation('Native CSV work requires explicit producer capture.');
-        $snapshot = $this->context->snapshot();
+        $snapshot = $this->context->current()->snapshot();
         $current = $snapshot->mode === OwnershipContextMode::Unresolved
             ? OwnershipJobEnvelope::unowned($snapshot->generations) : OwnershipJobEnvelope::fromSnapshot($snapshot);
         if ($current->toArray() !== $envelope->toArray() || $work->tenantId !== null

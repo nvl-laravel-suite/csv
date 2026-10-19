@@ -20,9 +20,9 @@ use Nvl\Csv\Tenancy\CsvAdoptionAdapter;
 use Nvl\Data\Services\TypeScriptSourceRegistry;
 use Nvl\Ownership\Services\OwnershipAdoptionRegistry;
 use Nvl\Support\Globals\GlobalNames;
-use Nvl\Support\Ownership\Contracts\OwnershipContext;
 use Nvl\Support\Ownership\Contracts\OwnershipIntegratedProvider;
 use Nvl\Support\Ownership\Contracts\OwnershipQueueContext;
+use Nvl\Support\Ownership\Services\OwnershipContextResolver;
 use Nvl\Support\Providers\SupportServiceProvider;
 use Nvl\Support\Tenancy\Contracts\TenantContext;
 use Nvl\Support\Tenancy\Contracts\TenantQueueContext;
@@ -62,7 +62,7 @@ final class CsvServiceProvider extends ServiceProvider implements OwnershipInteg
             $app->make(CSVWorkStore::class),
             $app->make(CSVHandlerRegistry::class),
             $app->make(TenantQueueContext::class),
-            $app->make(OwnershipContext::class),
+            $app->make(OwnershipContextResolver::class),
             $app->make(OwnershipQueueContext::class),
         ));
     }

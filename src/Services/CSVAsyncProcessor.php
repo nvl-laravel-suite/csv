@@ -21,10 +21,10 @@ use Nvl\Csv\Ownership\CSVBatchCallbacks;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
 use Nvl\Csv\ValueObjects\CSVWorkReference;
 use Nvl\Support\Config\PackageOptions;
-use Nvl\Support\Ownership\Contracts\OwnershipContext;
 use Nvl\Support\Ownership\Contracts\OwnershipQueueContext;
 use Nvl\Support\Ownership\Enums\OwnershipContextMode;
 use Nvl\Support\Ownership\Exceptions\OwnershipViolation;
+use Nvl\Support\Ownership\Services\OwnershipContextResolver;
 use Nvl\Support\Ownership\ValueObjects\OwnershipJobEnvelope;
 use Nvl\Support\Tenancy\Contracts\TenantContext;
 use Nvl\Support\Tenancy\Contracts\TenantQueueContext;
@@ -75,7 +75,7 @@ final class CSVAsyncProcessor implements CSVAsyncProcessorContract
         private readonly ?CSVWorkStore $workStore = null,
         private readonly ?CSVHandlerRegistry $handlers = null,
         private readonly ?TenantQueueContext $queueContext = null,
-        private readonly ?OwnershipContext $ownership = null,
+        private readonly ?OwnershipContextResolver $ownership = null,
         private readonly ?OwnershipQueueContext $ownershipQueue = null,
     ) {
         $this->chunkSize = 1000;
@@ -294,8 +294,8 @@ final class CSVAsyncProcessor implements CSVAsyncProcessorContract
                 throw new OwnershipViolation('Captured CSV mappings cannot serialize callbacks.');
             }
         }
-        $envelope = $this->ownership->snapshot()->mode === OwnershipContextMode::Unresolved
-            ? $this->ownershipQueue->captureUnowned() : OwnershipJobEnvelope::capture($this->ownership);
+        $envelope = $this->ownership->current()->snapshot()->mode === OwnershipContextMode::Unresolved
+            ? $this->ownershipQueue->captureUnowned() : OwnershipJobEnvelope::capture($this->ownership->current());
 
         return $this->ownershipQueue->run($envelope, function () use ($envelope): Batch {
             $disk = config('nvl-csv.work.disk', 'local');

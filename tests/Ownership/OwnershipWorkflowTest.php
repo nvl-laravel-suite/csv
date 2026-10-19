@@ -103,3 +103,19 @@ it('binds queued chunks to the original manifest bytes even if a stored checksum
         unlink($path);
     }
 });
+
+it('uses the current producer lifecycle when a processor survives scoped-container cleanup', function (): void {
+    $processor = app(CSVAsyncProcessor::class);
+    $this->app->forgetScopedInstances();
+    $path = tempnam(sys_get_temp_dir(), 'nvl_csv_');
+    file_put_contents($path, "name\nCurrent owner row\n");
+    try {
+        app(OwnershipRunner::class)->run(Company::query()->findOrFail(7), Actor::query()->findOrFail(1), function () use ($path, $processor): void {
+            $processor->fromFile($path)->withOptions(CSVImportOptionsData::from(['filePath' => $path]))->usingHandler('ownership-rows')->processAsync();
+            $payload = json_decode(DB::table('jobs')->sole()->payload, true, flags: JSON_THROW_ON_ERROR);
+            expect($payload['data']['nvl_ownership']['owner']['key'])->toBe('7');
+        });
+    } finally {
+        unlink($path);
+    }
+});
