@@ -8,6 +8,7 @@ use Closure;
 use DivisionByZeroError;
 use Exception;
 use Illuminate\Bus\Batch;
+use Illuminate\Container\Container;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -16,9 +17,15 @@ use JsonException;
 use Nvl\Csv\Contracts\CSVAsyncProcessorContract;
 use Nvl\Csv\Data\CSVImportOptionsData;
 use Nvl\Csv\Jobs\ProcessCSVChunkJob;
+use Nvl\Csv\Ownership\CSVBatchCallbacks;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
 use Nvl\Csv\ValueObjects\CSVWorkReference;
 use Nvl\Support\Config\PackageOptions;
+use Nvl\Support\Ownership\Contracts\OwnershipContext;
+use Nvl\Support\Ownership\Contracts\OwnershipQueueContext;
+use Nvl\Support\Ownership\Enums\OwnershipContextMode;
+use Nvl\Support\Ownership\Exceptions\OwnershipViolation;
+use Nvl\Support\Ownership\ValueObjects\OwnershipJobEnvelope;
 use Nvl\Support\Tenancy\Contracts\TenantContext;
 use Nvl\Support\Tenancy\Contracts\TenantQueueContext;
 use Nvl\Support\Tenancy\Enums\TenantContextMode;
@@ -68,6 +75,8 @@ final class CSVAsyncProcessor implements CSVAsyncProcessorContract
         private readonly ?CSVWorkStore $workStore = null,
         private readonly ?CSVHandlerRegistry $handlers = null,
         private readonly ?TenantQueueContext $queueContext = null,
+        private readonly ?OwnershipContext $ownership = null,
+        private readonly ?OwnershipQueueContext $ownershipQueue = null,
     ) {
         $this->chunkSize = 1000;
     }
@@ -79,7 +88,7 @@ final class CSVAsyncProcessor implements CSVAsyncProcessorContract
      */
     public static function make(): self
     {
-        return new self;
+        return Container::getInstance()->bound(self::class) ? Container::getInstance()->make(self::class) : new self;
     }
 
     /**
@@ -136,6 +145,9 @@ final class CSVAsyncProcessor implements CSVAsyncProcessorContract
     public function mapField(string $csvField, string $targetField, ?CSVFieldMapping $mapping = null): self
     {
         $candidate = $mapping ?? CSVFieldMapping::simple($csvField, $targetField);
+        if ($this->ownershipEnabled() && ($candidate->transformer !== null || $candidate->validators !== [])) {
+            throw new OwnershipViolation('Captured CSV mappings cannot contain callbacks.');
+        }
         if ($this->tenantEnabled() && ($candidate->transformer !== null || $candidate->validators !== [])) {
             throw new TenantBoundaryViolation('Tenant CSV mappings cannot contain callback-backed transformations.');
         }
@@ -206,7 +218,7 @@ final class CSVAsyncProcessor implements CSVAsyncProcessorContract
         if (trim($alias) === '' || $version < 1) {
             throw new InvalidArgumentException('CSV handler alias and version are required.');
         }
-        if ($this->handlers !== null && ! $this->handlers->has($alias)) {
+        if ($this->handlers !== null && ! $this->handlers->has($alias, $version)) {
             throw new InvalidArgumentException("CSV handler [{$alias}] is not registered.");
         }
         $this->handlerAlias = $alias;
@@ -228,6 +240,9 @@ final class CSVAsyncProcessor implements CSVAsyncProcessorContract
     {
         if ($this->filePath === null || $this->options === null) {
             throw new RuntimeException('File path and options must be set before processing');
+        }
+        if ($this->ownershipEnabled()) {
+            return $this->processOwnershipAsync();
         }
         if ($this->tenantEnabled()) {
             return $this->processTenantAsync();
@@ -264,11 +279,47 @@ final class CSVAsyncProcessor implements CSVAsyncProcessorContract
         }
     }
 
+    /** Stage JSON-only work inside the explicitly captured producer frame. */
+    private function processOwnershipAsync(): Batch
+    {
+        if ($this->ownership === null || $this->ownershipQueue === null || $this->workStore === null || $this->handlers === null
+            || $this->handlerAlias === null || ! $this->handlers->has($this->handlerAlias, $this->handlerVersion)) {
+            throw new OwnershipViolation('Native CSV processing requires injected capture services and a registered row handler.');
+        }
+        if ($this->rowProcessor !== null || $this->progressCallback !== null || $this->batchCallback !== null || $this->completionCallback !== null) {
+            throw new OwnershipViolation('Captured CSV work requires class-resolved handlers.');
+        }
+        foreach ($this->fieldMappings as $mapping) {
+            if ($mapping->transformer !== null || $mapping->validators !== []) {
+                throw new OwnershipViolation('Captured CSV mappings cannot serialize callbacks.');
+            }
+        }
+        $envelope = $this->ownership->snapshot()->mode === OwnershipContextMode::Unresolved
+            ? $this->ownershipQueue->captureUnowned() : OwnershipJobEnvelope::capture($this->ownership);
+
+        return $this->ownershipQueue->run($envelope, function () use ($envelope): Batch {
+            $disk = config('nvl-csv.work.disk', 'local');
+            if (! is_string($disk) || $disk === '') {
+                throw new OwnershipViolation('CSV work requires an explicitly configured private disk.');
+            }
+            $work = CSVWorkReference::forOwnership((string) Str::uuid(), $envelope, $disk, $this->handlerAlias ?? throw new OwnershipViolation, $this->handlerVersion);
+            $jobs = $this->createTenantJobs($work, $envelope);
+            $pending = Bus::batch($jobs)->name('CSV Processing: '.$work->workId)->allowFailures()->finally(CSVBatchCallbacks::cleanup($work))
+                ->onConnection(PackageOptions::queueConnection('csv'))->onQueue(PackageOptions::queueName('csv'));
+            try {
+                return ($this->ownershipQueue ?? throw new OwnershipViolation)->captureBatch($pending)->dispatch();
+            } catch (Throwable $exception) {
+                ($this->workStore ?? throw new OwnershipViolation)->delete($work);
+                throw $exception;
+            }
+        });
+    }
+
     /** Stage JSON-only tenant work and capture native batch context before dispatch. */
     private function processTenantAsync(): Batch
     {
         if ($this->context === null || $this->workStore === null || $this->handlers === null || $this->queueContext === null
-            || $this->handlerAlias === null || ! $this->handlers->has($this->handlerAlias)) {
+            || $this->handlerAlias === null || ! $this->handlers->has($this->handlerAlias, $this->handlerVersion)) {
             throw new TenantBoundaryViolation('Tenant CSV processing requires injected work services and a registered handler.');
         }
         if ($this->rowProcessor !== null || $this->progressCallback !== null || $this->batchCallback !== null || $this->completionCallback !== null) {
@@ -464,7 +515,7 @@ final class CSVAsyncProcessor implements CSVAsyncProcessorContract
      *
      * @return list<ProcessCSVChunkJob>
      */
-    private function createTenantJobs(CSVWorkReference $work, TenantJobEnvelope $envelope): array
+    private function createTenantJobs(CSVWorkReference $work, TenantJobEnvelope|OwnershipJobEnvelope $envelope): array
     {
         if ($this->filePath === null || $this->options === null || $this->workStore === null) {
             throw new TenantBoundaryViolation('Tenant CSV work is not fully configured.');
@@ -490,7 +541,7 @@ final class CSVAsyncProcessor implements CSVAsyncProcessorContract
             if ($buffer !== []) {
                 $chunks[] = $this->writeTenantChunk($work, $chunkIndex, $buffer);
             }
-            $this->workStore->write($work, [
+            $manifestChecksum = $this->workStore->write($work, [
                 'options' => $options,
                 'mappings' => $mappings,
                 'chunks' => $chunks,
@@ -501,7 +552,9 @@ final class CSVAsyncProcessor implements CSVAsyncProcessorContract
         }
 
         return array_map(
-            fn (array $chunk): ProcessCSVChunkJob => ProcessCSVChunkJob::fromTenantWork($work, (int) $chunk['index'], $envelope),
+            fn (array $chunk): ProcessCSVChunkJob => $envelope instanceof OwnershipJobEnvelope
+                ? ProcessCSVChunkJob::fromOwnershipWork($work, (int) $chunk['index'], $envelope, $manifestChecksum ?? throw new OwnershipViolation('Native CSV work requires a sealed manifest.'))
+                : ProcessCSVChunkJob::fromTenantWork($work, (int) $chunk['index'], $envelope),
             $chunks,
         );
     }
@@ -647,8 +700,17 @@ final class CSVAsyncProcessor implements CSVAsyncProcessorContract
             || ($this->context !== null && $this->context->snapshot()->mode !== TenantContextMode::Disabled);
     }
 
+    /** Select native capture from explicit deployment configuration. */
+    private function ownershipEnabled(): bool
+    {
+        return config('nvl-ownership.enabled') === true;
+    }
+
     private function rejectTenantClosure(): void
     {
+        if ($this->ownershipEnabled()) {
+            throw new OwnershipViolation('Captured CSV work requires a class-resolved row handler.');
+        }
         if ($this->tenantEnabled()) {
             throw new TenantBoundaryViolation('Tenant CSV processing requires a class-resolved row handler.');
         }

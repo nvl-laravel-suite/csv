@@ -18,8 +18,12 @@ use Nvl\Csv\Services\CSVImport;
 use Nvl\Csv\Services\CSVWorkStore;
 use Nvl\Csv\Tenancy\CsvAdoptionAdapter;
 use Nvl\Data\Services\TypeScriptSourceRegistry;
+use Nvl\Ownership\Services\OwnershipAdoptionRegistry;
 use Nvl\Support\Globals\GlobalNames;
-use Nvl\Support\Providers\TenantServiceProvider;
+use Nvl\Support\Ownership\Contracts\OwnershipContext;
+use Nvl\Support\Ownership\Contracts\OwnershipIntegratedProvider;
+use Nvl\Support\Ownership\Contracts\OwnershipQueueContext;
+use Nvl\Support\Providers\SupportServiceProvider;
 use Nvl\Support\Tenancy\Contracts\TenantContext;
 use Nvl\Support\Tenancy\Contracts\TenantQueueContext;
 use Nvl\Support\Traits\RegistersNamespacedResources;
@@ -28,14 +32,17 @@ use Nvl\Tenancy\Services\TenantAdoptionRegistry;
 /**
  * Registers generated TypeScript discovery and publishable agent guidance.
  */
-final class CsvServiceProvider extends ServiceProvider
+final class CsvServiceProvider extends ServiceProvider implements OwnershipIntegratedProvider
 {
     use RegistersNamespacedResources;
 
     public function register(): void
     {
-        $this->app->register(TenantServiceProvider::class);
+        $this->app->register(SupportServiceProvider::class);
         $this->app->booted(function (): void {
+            if ($this->app->bound(OwnershipAdoptionRegistry::class)) {
+                $this->app->make(OwnershipAdoptionRegistry::class)->register('csv', \Nvl\Csv\Ownership\CsvAdoptionAdapter::class);
+            }
             if ($this->app->bound(TenantAdoptionRegistry::class)) {
                 $this->app->make(TenantAdoptionRegistry::class)->register('csv', CsvAdoptionAdapter::class);
             }
@@ -49,11 +56,14 @@ final class CsvServiceProvider extends ServiceProvider
         $this->app->bindIf(CSVAsyncProcessorContract::class, static fn (Container $app): CSVAsyncProcessorContract => $app->make(CSVAsyncProcessor::class));
 
         $this->app->singleton(CSVHandlerRegistry::class);
+        $this->app->bindIf(CSVWorkStore::class);
         $this->app->bindIf(CSVAsyncProcessor::class, fn (Container $app): CSVAsyncProcessor => new CSVAsyncProcessor(
             $app->make(TenantContext::class),
             $app->make(CSVWorkStore::class),
             $app->make(CSVHandlerRegistry::class),
             $app->make(TenantQueueContext::class),
+            $app->make(OwnershipContext::class),
+            $app->make(OwnershipQueueContext::class),
         ));
     }
 

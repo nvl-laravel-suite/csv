@@ -23,6 +23,11 @@ use Nvl\Csv\ValueObjects\CSVFieldMapping;
 use Nvl\Csv\ValueObjects\CSVWorkReference;
 use Nvl\Support\Config\PackageOptions;
 use Nvl\Support\Facades\PackageLog;
+use Nvl\Support\Ownership\Contracts\OwnershipQueuedJob;
+use Nvl\Support\Ownership\Enums\OwnershipContextMode;
+use Nvl\Support\Ownership\Exceptions\OwnershipViolation;
+use Nvl\Support\Ownership\ValueObjects\OwnershipJobEnvelope;
+use Nvl\Support\Ownership\ValueObjects\OwnershipSnapshot;
 use Nvl\Support\Tenancy\Contracts\TenantQueuedJob;
 use Nvl\Support\Tenancy\Enums\TenantContextMode;
 use Nvl\Support\Tenancy\Exceptions\TenantBoundaryViolation;
@@ -38,7 +43,7 @@ use Throwable;
  * validation, and transformation. It's designed to be part
  * of a larger batch processing operation for very large files.
  */
-final class ProcessCSVChunkJob implements ShouldQueue, TenantQueuedJob
+final class ProcessCSVChunkJob implements OwnershipQueuedJob, ShouldQueue, TenantQueuedJob
 {
     use Batchable;
     use Dispatchable;
@@ -72,6 +77,8 @@ final class ProcessCSVChunkJob implements ShouldQueue, TenantQueuedJob
 
     private readonly TenantJobEnvelope $envelope;
 
+    private readonly ?OwnershipJobEnvelope $ownership;
+
     /**
      * Create a new job instance.
      *
@@ -91,8 +98,11 @@ final class ProcessCSVChunkJob implements ShouldQueue, TenantQueuedJob
         public readonly ?Closure $rowProcessor = null,
         public readonly ?Closure $batchCallback = null,
         ?TenantJobEnvelope $envelope = null,
+        ?OwnershipJobEnvelope $ownership = null,
+        private readonly ?string $manifestChecksum = null,
     ) {
         $this->envelope = $envelope ?? new TenantJobEnvelope(new TenantContextSnapshot(TenantContextMode::Disabled));
+        $this->ownership = $ownership ?? (config('nvl-ownership.enabled') !== true && $this->envelope->context->mode === TenantContextMode::Disabled ? OwnershipJobEnvelope::fromSnapshot(new OwnershipSnapshot(OwnershipContextMode::Disabled)) : null);
         $this->serializedRowProcessor = $rowProcessor === null ? null : new SerializableClosure($rowProcessor);
         $this->serializedBatchCallback = $batchCallback === null ? null : new SerializableClosure($batchCallback);
         $this->onConnection(PackageOptions::queueConnection('csv'));
@@ -106,6 +116,24 @@ final class ProcessCSVChunkJob implements ShouldQueue, TenantQueuedJob
         $job->tenantWork = $work;
 
         return $job;
+    }
+
+    /** Create a scalar-reference native job without captured rows, models or callbacks. */
+    public static function fromOwnershipWork(CSVWorkReference $work, int $chunkIndex, OwnershipJobEnvelope $ownership, string $manifestChecksum): self
+    {
+        if ($work->ownership?->toArray() !== $ownership->toArray() || preg_match('/^[a-f0-9]{64}$/D', $manifestChecksum) !== 1) {
+            throw new OwnershipViolation('CSV job and work must share the exact captured boundary.');
+        }
+        $job = new self([], $chunkIndex, [], null, ownership: $ownership, manifestChecksum: $manifestChecksum);
+        $job->tenantWork = $work;
+
+        return $job;
+    }
+
+    /** Return only explicit producer capture; legacy payloads require draining. */
+    public function ownershipJobEnvelope(): OwnershipJobEnvelope
+    {
+        return $this->ownership ?? throw new OwnershipViolation('Legacy CSV jobs must be drained before ownership cutover.');
     }
 
     public function tenantJobEnvelope(): TenantJobEnvelope
@@ -192,7 +220,7 @@ final class ProcessCSVChunkJob implements ShouldQueue, TenantQueuedJob
             ? $this->resolveTenantChunkData($workStore ?? throw new TenantBoundaryViolation('Tenant CSV work store is unavailable.'))
             : [$this->resolveChunkData(), $this->options ?? throw new RuntimeException('CSV import options are missing.'), $this->fieldMappings];
         $handler = $this->tenantWork instanceof CSVWorkReference
-            ? ($handlers ?? throw new TenantBoundaryViolation('Tenant CSV handler registry is unavailable.'))->resolve($this->tenantWork->handlerAlias)
+            ? ($handlers ?? throw new TenantBoundaryViolation('Tenant CSV handler registry is unavailable.'))->resolve($this->tenantWork->handlerAlias, $this->tenantWork->handlerVersion)
             : null;
         $startTime = microtime(true);
         $processedRows = 0;
@@ -419,7 +447,7 @@ final class ProcessCSVChunkJob implements ShouldQueue, TenantQueuedJob
     private function resolveTenantChunkData(CSVWorkStore $workStore): array
     {
         $work = $this->tenantWork ?? throw new TenantBoundaryViolation('Tenant CSV work reference is missing.');
-        $manifest = $workStore->read($work);
+        $manifest = $workStore->read($work, $work->ownership === null ? null : ($this->manifestChecksum ?? throw new OwnershipViolation('Native CSV work requires its producer manifest seal.')));
         $chunks = $manifest['chunks'] ?? null;
         $options = $manifest['options'] ?? null;
         $mappings = $manifest['mappings'] ?? null;
