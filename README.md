@@ -3,12 +3,12 @@
 ## Quickstart
 
 ```sh
-composer require nvl/csv:^5.0
+composer require nvl/csv:^6.0
 php artisan nvl:install csv --dry-run
 php artisan nvl:install csv
 ```
 
-Required NVL dependencies: `nvl/core` (`^5.0`). Select a writable configured disk and trusted export columns. Queue tenant work through registered handlers; do not serialize request services or tenant context into jobs.
+Required NVL dependencies: `nvl/core` (`^6.0`). Select a writable configured disk and trusted export columns. Queue tenant work through registered handlers; do not serialize request services or tenant context into jobs.
 Review the published common config, select one migration owner, and run schema preflight before existing-table upgrades. The installer does not enable features or run migrations. Follow the detailed installation and capability sections below before invoking a storage/provider operation.
 
 Inject `Nvl\Csv\Contracts\CSVExportContract` in a host service. After supplying the trusted inputs described above, the first public call is:
@@ -34,7 +34,7 @@ See the [installation and publishing guide](https://github.com/nvl-laravel-suite
 
 | Item | Value |
 |---|---|
-| Installed through | `composer require nvl/csv:^5.0` |
+| Installed through | `composer require nvl/csv:^6.0` |
 | Module identifier | `nvl/csv` |
 | PHP namespace | `Nvl\Csv` |
 | Service provider | `Nvl\Csv\Providers\CsvServiceProvider` |
@@ -53,12 +53,12 @@ The public namespace is `Nvl\Csv`. Its fluent import/export surface is compatibl
 - PHP 8.4 or newer
 - Laravel 12–13
 - `ext-filter`, `ext-iconv`, `ext-json`, and `ext-mbstring`
-- `nvl/core:^5.0`
+- `nvl/core:^6.0`
 
 Install with Composer:
 
 ```bash
-composer require nvl/csv:^5.0
+composer require nvl/csv:^6.0
 ```
 
 Laravel discovers `Nvl\Csv\Providers\CsvServiceProvider` automatically. There is no package configuration or migration to publish for synchronous analysis, import, or export.

@@ -5,6 +5,13 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-10-20
+
+### Changed
+
+- Capture native ownership for queued imports/exports and deny source restoration outside admitted work. Preserve bounded processing, host handlers and quiet logging defaults.
+- Align required/development NVL peers on `^6.0`, optional peer conflicts on major 6, and `dev-main` on `6.x-dev`. Review [UPGRADING.md](UPGRADING.md) before rollout.
+
 ## [5.0.1] - 2026-10-08
 
 ### Changed
