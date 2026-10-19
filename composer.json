@@ -12,7 +12,6 @@
         "queue"
     ],
     "require": {
-        "php": "^8.4",
         "ext-filter": "*",
         "ext-iconv": "*",
         "ext-json": "*",
@@ -20,19 +19,22 @@
         "laravel/framework": "^12.0 || ^13.0",
         "laravel/serializable-closure": "^2.0.10",
         "nesbot/carbon": "^2.72 || ^3.0",
-        "nvl/core": "^5.0",
+        "nvl/core": "^5.1",
+        "php": "^8.4",
         "spatie/laravel-data": "^4.23"
     },
     "require-dev": {
         "larastan/larastan": "^3.10",
         "laravel/pint": "^1.27",
         "mockery/mockery": "^1.6",
+        "nvl/ownership": "^5.0",
         "nvl/tenancy": "^5.0",
         "orchestra/testbench": "^10.0 || ^11.0",
         "pestphp/pest": "^4.0",
         "pestphp/pest-plugin-laravel": "^4.0",
         "psr/log": "^3.0",
-        "spatie/typescript-transformer": "^3.3"
+        "spatie/typescript-transformer": "^3.3",
+        "symfony/process": "^7.0 || ^8.0"
     },
     "autoload": {
         "psr-4": {
@@ -94,10 +96,12 @@
     "minimum-stability": "stable",
     "prefer-stable": true,
     "suggest": {
-        "nvl/tenancy": "Enables enforcing tenant ownership, scoped execution, adoption, and captured tenant queue contexts.",
+        "nvl/ownership": "Adds optional model-declared ownership, isolation, adoption and captured worker contexts.",
+        "nvl/tenancy": "Temporary legacy tenancy bridge for existing tenant installations; native ownership does not require it.",
         "spatie/typescript-transformer": "Consume the declared TypeScript attributes and metadata (^3.3); Core retains the runtime transformation engine."
     },
     "conflict": {
+        "nvl/ownership": "<5.0 || >=6.0",
         "nvl/tenancy": "<5.0 || >=6.0"
     },
     "homepage": "https://github.com/nvl-laravel-suite/csv",
