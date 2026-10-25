@@ -4,138 +4,43 @@ declare(strict_types=1);
 
 use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
-use Illuminate\Filesystem\FilesystemServiceProvider;
 use Illuminate\Foundation\Application;
-use Nvl\Csv\Contracts\CSVAnalyzerContract;
-use Nvl\Csv\Contracts\CSVAsyncProcessorContract;
-use Nvl\Csv\Contracts\CSVExportContract;
-use Nvl\Csv\Contracts\CSVImportContract;
+use Nvl\Csv\Contracts\CSVRowHandler;
 use Nvl\Csv\Providers\CsvServiceProvider;
-use Nvl\Csv\Services\CSVAnalyzerService;
+use Nvl\Csv\Services\CsvAnalyzer;
 use Nvl\Csv\Services\CSVAsyncProcessor;
-use Nvl\Csv\Services\CSVExport;
-use Nvl\Csv\Services\CSVImport;
-use Nvl\Csv\Tests\TestCase;
+use Nvl\Csv\Services\CsvExporter;
+use Nvl\Csv\Services\CSVHandlerRegistry;
+use Nvl\Csv\Services\CsvImporter;
+use Nvl\Support\Tenancy\Contracts\TenantContext;
 
-if (! in_array(dirname(__DIR__).'/Pest.php', get_included_files(), true)) {
-    uses(TestCase::class);
-}
-
-/** @return list<array{class-string, class-string}> */
-function nvlConsumerBindingsForCsv(): array
-{
-    return [
-        [CSVAnalyzerContract::class, CSVAnalyzerService::class],
-        [CSVAsyncProcessorContract::class, CSVAsyncProcessor::class],
-        [CSVExportContract::class, CSVExport::class],
-        [CSVImportContract::class, CSVImport::class],
-    ];
-}
-
-test('published workflow contracts retain native signatures attributes and generic documentation', function (): void {
-    $genericDocumentation = static function (string|false $documentation): array {
-        if ($documentation === false) {
-            return [];
-        }
-        preg_match_all('/@param\s+([^\r\n]+?)\s+(\$[A-Za-z_][A-Za-z0-9_]*)\b/', $documentation, $parameters, PREG_SET_ORDER);
-        $result = [];
-        foreach ($parameters as $parameter) {
-            $type = preg_replace('/\s+/', '', $parameter[1]);
-            if (str_contains($type, '<') || str_contains($type, '{') || str_contains($type, '[]')) {
-                $result['@param'.$parameter[2]] = $type;
-            }
-        }
-        if (preg_match('/@return\s+([^\r\n]+)/', $documentation, $return) === 1) {
-            $type = '';
-            $depth = 0;
-            foreach (str_split($return[1]) as $character) {
-                if (preg_match('/\s/', $character) === 1 && $depth === 0) {
-                    break;
-                }
-                if (str_contains('<{([', $character)) {
-                    $depth++;
-                } elseif (str_contains('>})]', $character)) {
-                    $depth--;
-                }
-                if (preg_match('/\s/', $character) !== 1) {
-                    $type .= $character;
-                }
-            }
-            if (str_contains($type, '<') || str_contains($type, '{') || str_contains($type, '[]')) {
-                $result['@return'] = $type;
-            }
-        }
-
-        return $result;
-    };
-
-    foreach (nvlConsumerBindingsForCsv() as [$contract, $implementation]) {
-        $interface = new ReflectionClass($contract);
-        $concrete = new ReflectionClass($implementation);
-        expect($interface->isInterface())->toBeTrue()
-            ->and($concrete->implementsInterface($contract))->toBeTrue();
-        foreach ($interface->getMethods() as $method) {
-            $native = $concrete->getMethod($method->getName());
-            $return = (string) $method->getReturnType();
-
-            $publishedTypes = $genericDocumentation($method->getDocComment());
-            foreach ($genericDocumentation($native->getDocComment()) as $tag => $type) {
-                expect($publishedTypes[$tag] ?? null)->toBe($type);
-            }
-
-            expect($native->isPublic())->toBeTrue()
-                ->and($native->isStatic())->toBeFalse()
-                ->and(count($method->getParameters()))->toBe(count($native->getParameters()));
-            if (! in_array($return, ['self', $method->getDeclaringClass()->getName()], true)) {
-                expect((string) $native->getReturnType())->toBe($return);
-            } else {
-                $nativeReturn = (string) $native->getReturnType();
-                expect($native->getReturnType())->toBeInstanceOf(ReflectionNamedType::class)
-                    ->and($native->getReturnType()->allowsNull())->toBe($method->getReturnType()->allowsNull())
-                    ->and(is_a(in_array($nativeReturn, ['self', 'static'], true) ? $native->getDeclaringClass()->getName() : $nativeReturn, $contract, true))->toBeTrue();
-            }
-            foreach ($method->getParameters() as $position => $parameter) {
-                $actual = $native->getParameters()[$position];
-                expect($actual->getName())->toBe($parameter->getName())
-                    ->and((string) $actual->getType())->toBe((string) $parameter->getType())
-                    ->and($actual->isVariadic())->toBe($parameter->isVariadic())
-                    ->and($actual->isPassedByReference())->toBe($parameter->isPassedByReference())
-                    ->and($actual->isDefaultValueAvailable())->toBe($parameter->isDefaultValueAvailable())
-                    ->and(array_map(static fn (ReflectionAttribute $attribute): array => [$attribute->getName(), $attribute->getArguments()], $actual->getAttributes()))
-                    ->toBe(array_map(static fn (ReflectionAttribute $attribute): array => [$attribute->getName(), $attribute->getArguments()], $parameter->getAttributes()));
-                if ($parameter->isDefaultValueAvailable()) {
-                    expect($actual->getDefaultValue())->toEqual($parameter->getDefaultValue());
-                }
-            }
-        }
+it('publishes the native CSV service signatures', function (): void {
+    foreach ([
+        [CsvAnalyzer::class, 'analyze', ['string', 'array'], 'array'],
+        [CsvImporter::class, 'import', ['string', 'array', CSVRowHandler::class], 'array'],
+        [CsvExporter::class, 'export', ['iterable', 'array'], 'string'],
+    ] as [$service, $method, $parameters, $result]) {
+        $reflection = new ReflectionMethod($service, $method);
+        expect(array_map(static fn (ReflectionParameter $parameter): string => (string) $parameter->getType(), $reflection->getParameters()))->toBe($parameters)
+            ->and((string) $reflection->getReturnType())->toBe($result);
     }
 });
 
-test('native provider defaults resolve each workflow while preserving late host substitutes', function (): void {
-    foreach (nvlConsumerBindingsForCsv() as [$contract, $implementation]) {
-        expect($this->app->bound($contract))->toBeTrue()
-            ->and($this->app->make($contract))->toBeInstanceOf($implementation);
-        $host = Mockery::mock($contract);
-        $this->app->instance($contract, $host);
-        expect($this->app->make($contract))->toBe($host);
+it('resolves each native workflow without Data or Tenancy bindings', function (): void {
+    foreach ([CsvAnalyzer::class, CsvImporter::class, CsvExporter::class, CSVAsyncProcessor::class, CSVHandlerRegistry::class] as $service) {
+        expect($this->app->make($service))->toBeInstanceOf($service);
     }
+    expect($this->app->bound(TenantContext::class))->toBeFalse();
 });
 
-test('provider registration preserves early interface bindings in a second native application', function (): void {
+it('preserves early host class bindings in a second native application', function (): void {
     $consumer = new Application($this->app->basePath());
     $consumer->instance('config', new Repository($this->app->make('config')->all()));
-    $consumer->instance('env', 'testing');
-    $consumer->register(FilesystemServiceProvider::class);
-    $hosts = [];
-    foreach (nvlConsumerBindingsForCsv() as [$contract]) {
-        $hosts[$contract] = Mockery::mock($contract);
-        $consumer->instance($contract, $hosts[$contract]);
-    }
+    $host = new stdClass;
+    $consumer->instance(CsvAnalyzer::class, $host);
     try {
         $consumer->register(CsvServiceProvider::class);
-        foreach ($hosts as $contract => $host) {
-            expect($consumer->make($contract))->toBe($host);
-        }
+        expect($consumer->make(CsvAnalyzer::class))->toBe($host);
     } finally {
         Container::setInstance($this->app);
         $consumer->flush();

@@ -6,12 +6,12 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
-use Nvl\Csv\Data\CSVExportOptionsData;
 use Nvl\Csv\Enums\CSVDelimiterEnum;
 use Nvl\Csv\Enums\CSVEncodingEnum;
 use Nvl\Csv\Enums\CSVExportFormatEnum;
 use Nvl\Csv\Exceptions\CSVConfigurationException;
-use Nvl\Csv\Services\CSVExport;
+use Nvl\Csv\Exceptions\CSVMemoryException;
+use Nvl\Csv\Services\CsvExporter;
 use Nvl\Csv\Tests\Fixtures\CsvExportRecord;
 use Nvl\Csv\ValueObjects\CSVConfiguration;
 
@@ -27,11 +27,11 @@ it('round trips quotes and backslashes through standard CSV readers', function (
         'includeHeaders' => false,
     ];
     $options = $format === null
-        ? array_merge(CSVExportOptionsData::defaults(), $options)
+        ? array_merge([], $options)
         : [...$options, 'format' => $format];
     $row = ['quote' => 'say "hello"', 'path' => 'folder,\\', 'escaped' => 'before\\"after'];
 
-    CSVExport::make()->withOptions(CSVExportOptionsData::from($options))->fromArray([$row]);
+    CsvExporter::make()->withOptions(csvOptions($options))->fromArray([$row]);
 
     $contents = Storage::disk('csv-exports')->get('escaping.csv');
     if (str_starts_with($contents, "\xEF\xBB\xBF")) {
@@ -50,7 +50,7 @@ it('round trips quotes and backslashes through standard CSV readers', function (
 })->with([null, ...CSVExportFormatEnum::cases()]);
 
 it('exports arrays with DTO-controlled dialect, headings, fields, and BOM', function (): void {
-    $options = CSVExportOptionsData::from([
+    $options = csvOptions([
         'disk' => 'csv-exports',
         'path' => 'reports',
         'filename' => 'people.csv',
@@ -62,7 +62,7 @@ it('exports arrays with DTO-controlled dialect, headings, fields, and BOM', func
         'fields' => ['profile.name', 'city'],
     ]);
 
-    $result = CSVExport::make()
+    $result = CsvExporter::make()
         ->withOptions($options)
         ->fromArray([
             ['profile' => ['name' => 'Jane'], 'city' => 'Sofia'],
@@ -74,16 +74,16 @@ it('exports arrays with DTO-controlled dialect, headings, fields, and BOM', func
     expect($contents)->toStartWith("\xEF\xBB\xBF")
         ->and($contents)->toContain("Name;City\r\n")
         ->and($contents)->toContain("Jane;Sofia\r\n")
-        ->and($result->isSuccessful())->toBeTrue()
-        ->and($result->rowCount)->toBe(2)
-        ->and($result->columnCount)->toBe(2)
-        ->and($result->fileExists())->toBeTrue()
-        ->and($result->metadata['storage_path'])->toBe('reports/people.csv')
-        ->and($result->toDownloadResponse()['success'])->toBeTrue();
+        ->and($result['row_count'] > 0)->toBeTrue()
+        ->and($result['row_count'])->toBe(2)
+        ->and($result['column_count'])->toBe(2)
+        ->and($result['file_size'] > 0)->toBeTrue()
+        ->and($result['metadata']['storage_path'])->toBe('reports/people.csv')
+        ->and($result['row_count'] > 0)->toBeTrue();
 });
 
 it('preserves closure field extractors and index configuration', function (): void {
-    $result = CSVExport::make()
+    $result = CsvExporter::make()
         ->configure(CSVConfiguration::excel()->withIncludeIndex())
         ->disk('csv-exports')
         ->path('computed')
@@ -102,11 +102,11 @@ it('preserves closure field extractors and index configuration', function (): vo
     expect($contents)->toStartWith("\xEF\xBB\xBF")
         ->and($contents)->toContain("#,Label,Total\r\n")
         ->and($contents)->toContain("1,First,10\r\n")
-        ->and($result->columnCount)->toBe(3);
+        ->and($result['column_count'])->toBe(3);
 });
 
 it('streams UTF-16 output as one consistently encoded file', function (): void {
-    $options = CSVExportOptionsData::from([
+    $options = csvOptions([
         'disk' => 'csv-exports',
         'filename' => 'utf16.csv',
         'encoding' => CSVEncodingEnum::UTF16_LE,
@@ -114,7 +114,7 @@ it('streams UTF-16 output as one consistently encoded file', function (): void {
         'fields' => ['name', 'city'],
     ]);
 
-    CSVExport::make()
+    CsvExporter::make()
         ->withOptions($options)
         ->fromArray([['name' => 'Иван', 'city' => 'София']]);
 
@@ -127,7 +127,7 @@ it('streams UTF-16 output as one consistently encoded file', function (): void {
 });
 
 it('exports collections and callback-provided streams', function (): void {
-    $collectionResult = CSVExport::make()
+    $collectionResult = CsvExporter::make()
         ->disk('csv-exports')
         ->filename('collection.csv')
         ->headings(['ID', 'Name'])
@@ -137,7 +137,7 @@ it('exports collections and callback-provided streams', function (): void {
             ['id' => 2, 'name' => 'Two'],
         ]));
 
-    $streamResult = CSVExport::make()
+    $streamResult = CsvExporter::make()
         ->disk('csv-exports')
         ->filename('stream.csv')
         ->headings(['ID'])
@@ -147,8 +147,8 @@ it('exports collections and callback-provided streams', function (): void {
             $write(new Collection([['id' => 3]]));
         });
 
-    expect($collectionResult->rowCount)->toBe(2)
-        ->and($streamResult->rowCount)->toBe(3)
+    expect($collectionResult['row_count'])->toBe(2)
+        ->and($streamResult['row_count'])->toBe(3)
         ->and(Storage::disk('csv-exports')->get('exports/stream.csv'))->toContain("3\n");
 });
 
@@ -163,7 +163,7 @@ it('exports Eloquent queries in bounded chunks', function (): void {
         ['name' => 'Three'],
     ]);
 
-    $result = CSVExport::make()
+    $result = CsvExporter::make()
         ->configure(CSVConfiguration::default()->withChunkSize(2))
         ->disk('csv-exports')
         ->filename('query.csv')
@@ -171,12 +171,12 @@ it('exports Eloquent queries in bounded chunks', function (): void {
         ->fields(['id', 'name'])
         ->fromQuery(CsvExportRecord::query()->orderBy('id'));
 
-    expect($result->rowCount)->toBe(3)
+    expect($result['row_count'])->toBe(3)
         ->and(Storage::disk('csv-exports')->get('exports/query.csv'))->toContain("3,Three\n");
 });
 
 it('supports chunked arrays, headerless files, and empty export results', function (): void {
-    $headerless = CSVExport::make()
+    $headerless = CsvExporter::make()
         ->configure(new CSVConfiguration(includeHeaders: false))
         ->disk('csv-exports')
         ->filename('headerless.csv')
@@ -184,18 +184,18 @@ it('supports chunked arrays, headerless files, and empty export results', functi
         ->chunked(1)
         ->fromArray([['id' => 1], ['id' => 2]]);
 
-    $empty = CSVExport::make()
+    $empty = CsvExporter::make()
         ->disk('csv-exports')
         ->filename('empty.csv')
         ->headings(['ID'])
         ->fromArray([]);
 
     expect(Storage::disk('csv-exports')->get('exports/headerless.csv'))->toBe("1\n2\n")
-        ->and($headerless->rowCount)->toBe(2)
-        ->and($empty->isSuccessful())->toBeFalse()
-        ->and($empty->hasErrors())->toBeFalse()
-        ->and($empty->getRowsPerSecond())->toBe(0.0)
-        ->and($empty->toArray()['successful'])->toBeFalse();
+        ->and($headerless['row_count'])->toBe(2)
+        ->and($empty['row_count'] > 0)->toBeFalse()
+        ->and($empty['errors'] !== [])->toBeFalse()
+        ->and((float) ($empty['row_count'] / max(1, $empty['processing_time'])))->toBe(0.0)
+        ->and($empty['row_count'] > 0)->toBeFalse();
 });
 
 it('infers headings and serializes common PHP value objects predictably', function (): void {
@@ -207,7 +207,7 @@ it('infers headings and serializes common PHP value objects predictably', functi
         }
     };
 
-    CSVExport::make()
+    CsvExporter::make()
         ->disk('csv-exports')
         ->filename('inferred.csv')
         ->fromArray([[
@@ -222,7 +222,7 @@ it('infers headings and serializes common PHP value objects predictably', functi
 });
 
 it('keeps inferred field order across rows and resets it between exports', function (): void {
-    $export = CSVExport::make()
+    $export = CsvExporter::make()
         ->disk('csv-exports')
         ->filename('inferred-order.csv');
 
@@ -244,7 +244,7 @@ it('keeps inferred field order across rows and resets it between exports', funct
 });
 
 it('does not write a UTF-8 BOM for legacy single-byte encodings', function (): void {
-    $options = CSVExportOptionsData::from([
+    $options = csvOptions([
         'disk' => 'csv-exports',
         'filename' => 'latin.csv',
         'encoding' => CSVEncodingEnum::ISO_8859_1,
@@ -253,7 +253,7 @@ it('does not write a UTF-8 BOM for legacy single-byte encodings', function (): v
         'fields' => ['name'],
     ]);
 
-    CSVExport::make()->withOptions($options)->fromArray([['name' => 'André']]);
+    CsvExporter::make()->withOptions($options)->fromArray([['name' => 'André']]);
 
     $contents = Storage::disk('csv-exports')->get('latin.csv');
     expect($contents)->not->toStartWith("\xEF\xBB\xBF")
@@ -261,14 +261,14 @@ it('does not write a UTF-8 BOM for legacy single-byte encodings', function (): v
 });
 
 it('rejects invalid disks and unsupported row values', function (): void {
-    expect(fn () => CSVExport::make()->disk('missing-disk'))
+    expect(fn () => CsvExporter::make()->disk('missing-disk'))
         ->toThrow(CSVConfigurationException::class);
 
     $resource = fopen('php://temp', 'r+');
     expect($resource)->not->toBeFalse();
 
     try {
-        expect(fn () => CSVExport::make()
+        expect(fn () => CsvExporter::make()
             ->disk('csv-exports')
             ->filename('invalid.csv')
             ->fromArray([['resource' => $resource]]))
@@ -278,4 +278,29 @@ it('rejects invalid disks and unsupported row values', function (): void {
             fclose($resource);
         }
     }
+});
+
+it('escapes spreadsheet formulas by default and honors explicit reject or allow policy', function (): void {
+    $row = ['value' => '=SUM(1,2)'];
+
+    $escaped = CsvExporter::make()->export([$row], ['headings' => ['value']]);
+    expect($escaped)->toContain("'=SUM(1,2)");
+
+    expect(fn (): string => CsvExporter::make()->export([$row], [
+        'headings' => ['value'], 'formula_policy' => 'reject',
+    ]))->toThrow(CSVConfigurationException::class);
+
+    $allowed = CsvExporter::make()->export([$row], [
+        'headings' => ['value'], 'formula_policy' => 'allow',
+    ]);
+    expect($allowed)->toContain('=SUM(1,2)')->not->toContain("'=SUM(1,2)");
+});
+
+it('checks the byte budget before materializing a native string export', function (): void {
+    $value = str_repeat('a', 512 * 1024);
+    $budget = memory_get_usage(true) + 128 * 1024;
+
+    expect(fn (): string => CsvExporter::make()->export([['value' => $value]], [
+        'headings' => ['value'], 'memory_limit' => $budget,
+    ]))->toThrow(CSVMemoryException::class);
 });

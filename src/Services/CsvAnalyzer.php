@@ -8,8 +8,6 @@ use Carbon\Carbon;
 use DivisionByZeroError;
 use Exception;
 use Illuminate\Support\Facades\Storage;
-use Nvl\Csv\Contracts\CSVAnalyzerContract;
-use Nvl\Csv\Data\CSVAnalysisResultData;
 use Nvl\Csv\Enums\CSVDataQualityEnum;
 use Nvl\Csv\Enums\CSVDelimiterEnum;
 use Nvl\Csv\Enums\CSVEncodingEnum;
@@ -24,7 +22,7 @@ use RuntimeException;
  *
  * @api
  */
-final class CSVAnalyzerService implements CSVAnalyzerContract
+final class CsvAnalyzer
 {
     private const SAMPLE_SIZE = 100;
 
@@ -98,15 +96,22 @@ final class CSVAnalyzerService implements CSVAnalyzerContract
      * Returns comprehensive results suitable for optimizing import operations.
      *
      * @param  string  $filePath  Absolute path to the CSV file to analyze
-     * @return CSVAnalysisResultData Complete analysis results with recommendations and statistics
+     * @return array<string,mixed> Complete analysis results with recommendations and statistics
      *
      * @throws CSVFileNotFoundException If the specified file does not exist or cannot be accessed
      * @throws RuntimeException If file operations fail or system resources are unavailable
      * @throws Exception If analysis operations encounter unexpected errors
      * @throws DivisionByZeroError If statistical calculations encounter division by zero
      */
-    public function analyzeFile(string $filePath): CSVAnalysisResultData
+    /** @param array<string,mixed> $options
+     * @return array<string,mixed>
+     */
+    public function analyze(string $filePath, array $options = []): array
     {
+        if ($options !== []) {
+            throw new \InvalidArgumentException('CSV analysis does not accept unknown options.');
+        }
+
         $startTime = microtime(true);
 
         if (! file_exists($filePath)) {
@@ -131,14 +136,14 @@ final class CSVAnalyzerService implements CSVAnalyzerContract
      *
      * @param  string  $disk  Storage disk name (local, s3, public, etc.)
      * @param  string  $path  Path to the file on the specified storage disk
-     * @return CSVAnalysisResultData Complete analysis results with recommendations and statistics
+     * @return array<string,mixed> Complete analysis results with recommendations and statistics
      *
      * @throws CSVFileNotFoundException If the file does not exist on the specified disk
      * @throws RuntimeException If file operations or disk access fails
      * @throws Exception If analysis operations encounter unexpected errors
      * @throws DivisionByZeroError If statistical calculations encounter division by zero
      */
-    public function analyzeFromDisk(string $disk, string $path): CSVAnalysisResultData
+    public function analyzeDisk(string $disk, string $path): array
     {
         $diskInstance = Storage::disk($disk);
 
@@ -869,56 +874,58 @@ final class CSVAnalyzerService implements CSVAnalyzerContract
      * into a complete result object.
      *
      * @param  float  $analysisTime  Time taken to complete the analysis in seconds
-     * @return CSVAnalysisResultData Complete analysis results with comprehensive data and recommendations
+     * @return array<string,mixed> Complete analysis results with comprehensive data and recommendations
      *
      * @throws Exception If result creation fails or data compilation errors occur
      */
-    private function createResult(float $analysisTime): CSVAnalysisResultData
+    /** @return array<string,mixed> */
+    private function createResult(float $analysisTime): array
     {
         $estimatedMemory = $this->estimateMemoryUsage();
         $requiresChunking = $estimatedMemory > 128 * 1024 * 1024 || $this->rowCount > 10000;
         $recommendedChunkSize = $requiresChunking ? min(1000, max(100, (int) ($this->rowCount / 100))) : 0;
 
-        return CSVAnalysisResultData::from([
-            'filePath' => $this->filePath,
-            'fileSize' => $this->fileSize,
-            'rowCount' => $this->rowCount,
-            'columnCount' => $this->columnCount,
+        return [
+            'file_path' => $this->filePath,
+            'file_size' => $this->fileSize,
+            'row_count' => $this->rowCount,
+            'column_count' => $this->columnCount,
             'headers' => $this->headers,
-            'detectedDelimiter' => $this->delimiter,
-            'detectedEncoding' => $this->encoding,
-            'hasBom' => $this->hasBom,
-            'lineEnding' => $this->lineEnding,
-            'dataQuality' => $this->dataQuality,
-            'validityScore' => $this->validityScore,
-            'emptyRowCount' => $this->emptyRowCount,
-            'inconsistentRowCount' => $this->inconsistentRowCount,
-            'columnAnalysis' => $this->columnAnalysis,
-            'duplicateAnalysis' => $this->duplicateAnalysis,
-            'numericStatistics' => $this->numericStatistics,
-            'textStatistics' => $this->textStatistics,
-            'dateFormatAnalysis' => $this->dateFormatAnalysis,
+            'detected_delimiter' => $this->delimiter,
+            'detected_encoding' => $this->encoding,
+            'has_bom' => $this->hasBom,
+            'line_ending' => $this->lineEnding,
+            'data_quality' => $this->dataQuality,
+            'validity_score' => $this->validityScore,
+            'empty_row_count' => $this->emptyRowCount,
+            'inconsistent_row_count' => $this->inconsistentRowCount,
+            'column_analysis' => $this->columnAnalysis,
+            'duplicate_analysis' => $this->duplicateAnalysis,
+            'numeric_statistics' => $this->numericStatistics,
+            'text_statistics' => $this->textStatistics,
+            'date_format_analysis' => $this->dateFormatAnalysis,
             'issues' => $this->issues,
             'recommendations' => $this->recommendations,
-            'estimatedMemoryUsage' => $estimatedMemory,
-            'requiresChunking' => $requiresChunking,
-            'recommendedChunkSize' => $recommendedChunkSize,
-            'analyzedAt' => Carbon::now(),
-            'analysisTime' => $analysisTime,
-            'sampleData' => array_slice($this->sampleData, 0, 10),
+            'estimated_memory_usage' => $estimatedMemory,
+            'requires_chunking' => $requiresChunking,
+            'recommended_chunk_size' => $recommendedChunkSize,
+            'analyzed_at' => Carbon::now(),
+            'analysis_time' => $analysisTime,
+            'sample_data' => array_slice($this->sampleData, 0, 10),
             'metadata' => [
                 'analyzer_version' => '1.0.0',
                 'sample_size' => self::SAMPLE_SIZE,
                 'max_analysis_rows' => self::MAX_ANALYSIS_ROWS,
                 'analyzed_rows' => $this->analyzedRowCount,
             ],
-        ]);
+        ];
     }
 
     /**
      * Analyze the source selected by a public entry point.
      */
-    private function analyzeCurrentSource(float $startTime): CSVAnalysisResultData
+    /** @return array<string,mixed> */
+    private function analyzeCurrentSource(float $startTime): array
     {
         try {
             $this->openFile();

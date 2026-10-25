@@ -5,16 +5,16 @@ declare(strict_types=1);
 namespace Nvl\Csv\Tests\Type;
 
 use Illuminate\Database\Eloquent\Builder;
-use Nvl\Csv\Services\CSVExport;
+use Nvl\Csv\Services\CsvExporter;
 use Nvl\Csv\Tests\Fixtures\CsvExportRecord;
-use Nvl\Csv\ValueObjects\CSVExportResult;
 
 /**
  * Proves concrete model builders remain accepted without erasing their template type.
  *
  * @param  Builder<CsvExportRecord>  $records
+ * @return array<string,mixed>
  */
-function exportConcreteRecords(CSVExport $export, Builder $records): CSVExportResult
+function exportConcreteRecords(CsvExporter $export, Builder $records): array
 {
     return $export->fromQuery($records);
 }

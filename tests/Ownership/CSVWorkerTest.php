@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Nvl\Csv\Data\CSVImportOptionsData;
 use Nvl\Csv\Services\CSVAsyncProcessor;
 use Nvl\Csv\Tests\OwnerScopeTestCase;
 use Nvl\Ownership\Services\OwnershipRunner;
@@ -23,7 +22,7 @@ it('processes owned and global CSV batches with retry and private cleanup in an 
         $path = tempnam(sys_get_temp_dir(), 'nvl_csv_');
         file_put_contents($path, "name\n".$name."\n");
         try {
-            $process = fn () => app(CSVAsyncProcessor::class)->fromFile($path)->withOptions(CSVImportOptionsData::from(['filePath' => $path]))->usingHandler('ownership-rows')->processAsync();
+            $process = fn () => app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('ownership-rows')->processAsync();
             $batches[] = $owner === null ? $process() : app(OwnershipRunner::class)->run(Company::query()->findOrFail($owner), Actor::query()->findOrFail(1), $process);
         } finally {
             unlink($path);

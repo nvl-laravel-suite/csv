@@ -2,11 +2,6 @@
 
 declare(strict_types=1);
 
-use Carbon\Carbon;
-use Nvl\Csv\Data\CSVAnalysisResultData;
-use Nvl\Csv\Data\CSVExportOptionsData;
-use Nvl\Csv\Data\CSVImportOptionsData;
-use Nvl\Csv\Data\CSVProgressData;
 use Nvl\Csv\Enums\CSVDataQualityEnum;
 use Nvl\Csv\Enums\CSVDelimiterEnum;
 use Nvl\Csv\Enums\CSVDuplicateStrategyEnum;
@@ -23,10 +18,11 @@ use Nvl\Csv\Exceptions\CSVFileNotFoundException;
 use Nvl\Csv\Exceptions\CSVMemoryException;
 use Nvl\Csv\Exceptions\CSVParseException;
 use Nvl\Csv\Exceptions\CSVValidationException;
+use Nvl\Csv\Services\CsvAnalyzer;
+use Nvl\Csv\Services\CsvExporter;
+use Nvl\Csv\Services\CsvImporter;
 use Nvl\Csv\ValueObjects\CSVConfiguration;
-use Nvl\Csv\ValueObjects\CSVExportResult;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
-use Nvl\Csv\ValueObjects\CSVImportResult;
 
 it('exposes every delimiter, format, encoding, and processing mode contract', function (): void {
     foreach (CSVDelimiterEnum::cases() as $delimiter) {
@@ -232,164 +228,41 @@ it('casts and validates every CSV field type safely', function (): void {
     expect(fn () => CSVTypeEnum::STRING->cast([]))->toThrow(InvalidArgumentException::class);
 });
 
-it('builds immutable configurations and typed option DTOs', function (): void {
+it('validates native option arrays and preserves configuration invariants', function (): void {
     $configuration = CSVConfiguration::fromFormat(CSVExportFormatEnum::EXCEL)
-        ->withDelimiter(';')
-        ->withProcessingMode(CSVProcessingModeEnum::STREAM)
-        ->withChunkSize(250)
-        ->withIncludeIndex();
-
+        ->withDelimiter(';')->withProcessingMode(CSVProcessingModeEnum::STREAM)
+        ->withChunkSize(250)->withIncludeIndex();
     expect($configuration->delimiter)->toBe(';')
         ->and($configuration->includeIndex)->toBeTrue()
         ->and($configuration->isStreaming())->toBeTrue()
-        ->and($configuration->isChunked())->toBeTrue()
         ->and($configuration->getEffectiveChunkSize())->toBe(250)
-        ->and($configuration->toArray()['processing_mode'])->toBe('stream')
         ->and(CSVConfiguration::fromDelimiter(CSVDelimiterEnum::TAB)->delimiter)->toBe("\t")
-        ->and(CSVConfiguration::default()->isChunked())->toBeFalse()
-        ->and(CSVConfiguration::excel()->includeBOM)->toBeTrue()
-        ->and(CSVConfiguration::largeFile()->isStreaming())->toBeTrue();
-
-    $export = CSVExportOptionsData::excel('report.csv');
-    $largeExport = CSVExportOptionsData::largeFile('large.csv', 500);
-    $import = CSVImportOptionsData::strict('/tmp/import.csv');
-    $largeImport = CSVImportOptionsData::largeFile('/tmp/large.csv', 500);
-
-    expect($export->getFullPath())->toBe('report.csv')
-        ->and($export->getDelimiterCharacter())->toBe(',')
-        ->and($export->getEncoding())->toBe(CSVEncodingEnum::UTF8)
-        ->and($largeExport->isChunked())->toBeTrue()
-        ->and($largeExport->getFullPath())->toBe('large.csv')
-        ->and($import->shouldValidate())->toBeTrue()
-        ->and($import->hasHeaderRow())->toBeTrue()
-        ->and($import->getSkipRows())->toBe(0)
-        ->and($import->getLimitRows())->toBeNull()
-        ->and($import->getDuplicateStrategy())->toBe(CSVDuplicateStrategyEnum::SKIP)
-        ->and($import->getEncoding())->toBe(CSVEncodingEnum::UTF8)
-        ->and($import->getDelimiterCharacter())->toBe(',')
-        ->and($largeImport->isChunked())->toBeTrue()
-        ->and(CSVExportOptionsData::rules())->toHaveKey('filename')
-        ->and(CSVImportOptionsData::rules())->toHaveKey('filePath')
-        ->and(CSVExportOptionsData::messages())->toBeArray()
-        ->and(CSVImportOptionsData::attributes())->toBeArray();
+        ->and(CSVConfiguration::excel()->includeBOM)->toBeTrue();
+    expect(fn () => (new CsvImporter)->withOptions(['unknown' => true]))->toThrow(CSVConfigurationException::class);
+    expect(fn () => (new CsvExporter)->withOptions(['unknown' => true]))->toThrow(CSVConfigurationException::class);
 });
 
-it('tracks operation progress and result statistics', function (): void {
-    Carbon::setTestNow('2026-01-01 00:00:00');
-    $progress = CSVProgressData::initial('operation-1', 100);
-    Carbon::setTestNow('2026-01-01 00:00:10');
-    $progress = $progress->update([
-        'processedRows' => 50,
-        'successfulRows' => 45,
-        'failedRows' => 3,
-        'skippedRows' => 2,
-        'status' => CSVOperationStatusEnum::RUNNING,
-    ]);
-
-    expect($progress->isRunning())->toBeTrue()
-        ->and($progress->percentComplete)->toBe(50.0)
-        ->and($progress->rowsPerSecond)->toBe(5.0)
-        ->and($progress->getTimeRemainingFormatted())->toBe('10 sec')
-        ->and($progress->getDuration())->toBe(10.0)
-        ->and($progress->getMemoryUsageFormatted())->toBeString()
-        ->and($progress->getProgressBarData()['current'])->toBe(50)
-        ->and($progress->getStatistics()['success_rate'])->toBe('90%');
-
-    $completed = $progress->complete();
-    $failed = $progress->fail('Stopped', CSVErrorLevelEnum::CRITICAL);
-
-    expect($completed->isFinished())->toBeTrue()
-        ->and($completed->isSuccessful())->toBeTrue()
-        ->and($completed->getTimeRemainingFormatted())->toBe('0 sec')
-        ->and($failed->isFinished())->toBeTrue()
-        ->and($failed->isSuccessful())->toBeFalse()
-        ->and(CSVProgressData::rules())->toHaveKey('operationId')
-        ->and(CSVProgressData::messages())->toBeArray();
-
-    Carbon::setTestNow();
+it('tracks native import progress and bounded row statistics', function (): void {
+    $path = $this->temporaryCsv("id\n1\n2\n");
+    $importer = (new CsvImporter)->fromFile($path)->withTransaction(false);
+    $result = $importer->run();
+    expect($result['total_rows'])->toBe(2)
+        ->and($result['successful_rows'])->toBe(2)
+        ->and($result['failed_rows'])->toBe(0)
+        ->and($result['processing_time'])->toBeGreaterThanOrEqual(0.0)
+        ->and($importer->getProgress())->toMatchArray(['status' => 'complete', 'processed_rows' => 2]);
 });
 
-it('summarizes import, export, and analysis value objects', function (): void {
-    $started = Carbon::parse('2026-01-01 00:00:00');
-    $completed = Carbon::parse('2026-01-01 00:00:10');
-    $import = CSVImportResult::completed([
-        'total_rows' => 10,
-        'processed_rows' => 9,
-        'successful_rows' => 7,
-        'failed_rows' => 2,
-        'skipped_rows' => 1,
-        'started_at' => $started,
-        'completed_at' => $completed,
-        'errors' => ['two failures'],
-        'warnings' => ['one warning'],
-        'failed_rows_data' => [['row' => 2]],
-        'metadata' => ['source' => 'fixture'],
-    ]);
-    $export = CSVExportResult::fromExport(
-        ['path' => '/tmp/report.csv', 'url' => null],
-        [
-            'row_count' => 10,
-            'column_count' => 2,
-            'file_size' => 2048,
-            'processing_time' => 2.0,
-            'warnings' => ['warning'],
-        ],
-    );
-    $analysis = CSVAnalysisResultData::from([
-        'filePath' => '/tmp/data.csv',
-        'fileSize' => 1024,
-        'rowCount' => 100,
-        'columnCount' => 2,
-        'headers' => ['id', 'name'],
-        'detectedDelimiter' => CSVDelimiterEnum::COMMA,
-        'detectedEncoding' => CSVEncodingEnum::UTF8,
-        'hasBom' => false,
-        'lineEnding' => 'LF',
-        'dataQuality' => CSVDataQualityEnum::GOOD,
-        'validityScore' => 90,
-        'emptyRowCount' => 1,
-        'inconsistentRowCount' => 0,
-        'columnAnalysis' => [
-            'id' => ['type' => 'numeric', 'nullable' => false, 'sample' => '1'],
-            'name' => ['type' => 'text', 'nullable' => false, 'sample' => 'Jane'],
-        ],
-        'duplicateAnalysis' => ['id' => 0, 'name' => 1],
-        'numericStatistics' => [],
-        'textStatistics' => [],
-        'dateFormatAnalysis' => [],
-        'issues' => [['severity' => 'critical', 'message' => 'Review']],
-        'recommendations' => ['Review data'],
-        'estimatedMemoryUsage' => 1024,
-        'requiresChunking' => false,
-        'recommendedChunkSize' => 0,
-        'analyzedAt' => Carbon::now(),
-        'analysisTime' => 0.1,
-    ]);
-
-    expect($import->isPartiallySuccessful())->toBeTrue()
-        ->and($import->hasErrors())->toBeTrue()
-        ->and($import->hasWarnings())->toBeTrue()
-        ->and($import->getSuccessRate())->toBe(77.78)
-        ->and($import->getFailureRate())->toBe(22.22)
-        ->and($import->getSkipRate())->toBe(10.0)
-        ->and($import->getRowsPerSecond())->toBe(0.9)
-        ->and($import->getSummary())->toContain('7 rows')
-        ->and($import->getStatistics())->toHaveKey('success_rate')
-        ->and($import->toArray()['successful'])->toBeFalse()
-        ->and(CSVImportResult::initial(0)->isSuccessful())->toBeTrue()
-        ->and(CSVImportResult::initial(1)->isCompleteFailure())->toBeFalse()
-        ->and($export->isSuccessful())->toBeTrue()
-        ->and($export->hasWarnings())->toBeTrue()
-        ->and($export->hasErrors())->toBeFalse()
-        ->and($export->getHumanFileSize())->toBe('2 KB')
-        ->and($export->getProcessingTimeInSeconds())->toBe(2.0)
-        ->and($export->getRowsPerSecond())->toBe(5.0)
-        ->and($analysis->getFileSizeFormatted())->toBe('1024 B')
-        ->and($analysis->getCriticalIssues())->toHaveCount(1)
-        ->and($analysis->getProcessingStrategy())->toBe('memory')
-        ->and($analysis->getMemoryRecommendation())->toBeString()
-        ->and(CSVAnalysisResultData::rules())->toHaveKey('validityScore')
-        ->and(CSVAnalysisResultData::attributes())->toBeArray();
+it('returns native import export and analysis records', function (): void {
+    $path = $this->temporaryCsv("id,name\n1,Ada\n");
+    $analysis = (new CsvAnalyzer)->analyze($path);
+    $import = (new CsvImporter)->fromFile($path)->run();
+    $export = (new CsvExporter)->export([['id' => 1, 'name' => 'Ada']], ['headings' => ['ID', 'Name']]);
+    expect($analysis)->toHaveKeys(['row_count', 'detected_delimiter', 'column_analysis', 'issues'])
+        ->and($analysis['row_count'])->toBe(1)
+        ->and($import)->toHaveKeys(['successful_rows', 'failed_rows', 'errors', 'metadata'])
+        ->and($import['successful_rows'])->toBe(1)
+        ->and($export)->toContain("ID,Name\n1,Ada\n");
 });
 
 it('preserves field mapping factories, serialization, validation, and metadata', function (): void {
@@ -404,7 +277,7 @@ it('preserves field mapping factories, serialization, validation, and metadata',
         unique: true,
         metadata: ['label' => 'Name'],
     );
-    $restored = unserialize(serialize($transformed));
+    $restored = unserialize(serialize($simple));
 
     expect($simple->apply('Jane'))->toBe('Jane')
         ->and($typed->validate('42'))->toBeTrue()
@@ -412,11 +285,13 @@ it('preserves field mapping factories, serialization, validation, and metadata',
         ->and($typed->validate(''))->toBeFalse()
         ->and($typed->getValidationErrors(''))->not->toBeEmpty()
         ->and($restored)->toBeInstanceOf(CSVFieldMapping::class)
-        ->and($restored->apply('jane'))->toBe('JANE')
-        ->and($restored->validate('forbidden'))->toBeFalse()
-        ->and($restored->apply(''))->toBe('Unknown')
-        ->and($restored->shouldIndex())->toBeTrue()
-        ->and($restored->toArray()['metadata'])->toBe(['label' => 'Name']);
+        ->and($restored->apply('jane'))->toBe('jane')
+        ->and($transformed->apply('jane'))->toBe('JANE')
+        ->and($transformed->validate('forbidden'))->toBeFalse()
+        ->and($transformed->apply(''))->toBe('Unknown')
+        ->and($transformed->shouldIndex())->toBeTrue()
+        ->and($transformed->toArray()['metadata'])->toBe(['label' => 'Name']);
+    expect(fn () => serialize($transformed))->toThrow(InvalidArgumentException::class);
 });
 
 it('builds contextual exceptions for every compatibility factory', function (): void {

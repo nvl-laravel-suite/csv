@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Nvl\Csv\Data\CSVImportOptionsData;
 use Nvl\Csv\Services\CSVAsyncProcessor;
 use Nvl\Csv\Services\CSVHandlerRegistry;
 use Nvl\Csv\Services\CSVWorkStore;
@@ -26,7 +25,7 @@ it('stages captured private chunks and keeps status cancellation and manifests i
     try {
         $batch = app(OwnershipRunner::class)->run(Company::query()->findOrFail(7), Actor::query()->findOrFail(1), function () use ($path) {
             return app(CSVAsyncProcessor::class)->fromFile($path)
-                ->withOptions(CSVImportOptionsData::from(['filePath' => $path]))->usingHandler('ownership-rows')->processAsync();
+                ->usingHandler('ownership-rows')->processAsync();
         });
         $payload = json_decode(DB::table('jobs')->sole()->payload, true, flags: JSON_THROW_ON_ERROR);
         expect($payload['data']['nvl_ownership']['owner']['key'])->toBe('7')
@@ -49,7 +48,7 @@ it('rejects forged native manifest paths and foreign owner references before tou
     $work = app(OwnershipRunner::class)->run(Company::query()->findOrFail(7), $actor, function () {
         $work = CSVWorkReference::forOwnership('11111111-1111-4111-8111-111111111111', OwnershipJobEnvelope::capture(app(OwnershipContext::class)), 'local', 'ownership-rows', 1);
         app(CSVWorkStore::class)->write($work, ['chunks' => []]);
-        $forged = new CSVWorkReference($work->workId, null, $work->disk, '../outside/manifest.json', $work->handlerAlias, 1, $work->ownership);
+        $forged = new CSVWorkReference($work->workId, $work->disk, '../outside/manifest.json', $work->handlerAlias, 1, $work->ownership);
         expect(fn () => app(CSVWorkStore::class)->write($forged, []))->toThrow(OwnershipViolation::class);
 
         return $work;
@@ -65,7 +64,7 @@ it('runs optional unowned CSV handlers in an explicit global frame without grant
     $path = tempnam(sys_get_temp_dir(), 'nvl_csv_');
     file_put_contents($path, "name\nGlobal row\n");
     try {
-        app(CSVAsyncProcessor::class)->fromFile($path)->withOptions(CSVImportOptionsData::from(['filePath' => $path]))->usingHandler('ownership-rows')->processAsync();
+        app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('ownership-rows')->processAsync();
         $payload = json_decode(DB::table('jobs')->sole()->payload, true, flags: JSON_THROW_ON_ERROR);
         expect($payload['data']['nvl_ownership']['mode'])->toBe('unresolved');
         $job = unserialize($payload['data']['command']);
@@ -87,7 +86,7 @@ it('binds queued chunks to the original manifest bytes even if a stored checksum
     file_put_contents($path, "name\nOriginal row\n");
     try {
         app(OwnershipRunner::class)->run(Company::query()->findOrFail(7), Actor::query()->findOrFail(1), function () use ($path): void {
-            app(CSVAsyncProcessor::class)->fromFile($path)->withOptions(CSVImportOptionsData::from(['filePath' => $path]))->usingHandler('ownership-rows')->processAsync();
+            app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('ownership-rows')->processAsync();
             $payload = json_decode(DB::table('jobs')->sole()->payload, true, flags: JSON_THROW_ON_ERROR);
             $job = unserialize($payload['data']['command']);
             $manifestPath = array_values(array_filter(Storage::disk('local')->allFiles('ownership'), static fn (string $path): bool => str_ends_with($path, '/manifest.json')))[0];
@@ -111,9 +110,27 @@ it('uses the current producer lifecycle when a processor survives scoped-contain
     file_put_contents($path, "name\nCurrent owner row\n");
     try {
         app(OwnershipRunner::class)->run(Company::query()->findOrFail(7), Actor::query()->findOrFail(1), function () use ($path, $processor): void {
-            $processor->fromFile($path)->withOptions(CSVImportOptionsData::from(['filePath' => $path]))->usingHandler('ownership-rows')->processAsync();
+            $processor->fromFile($path)->usingHandler('ownership-rows')->processAsync();
             $payload = json_decode(DB::table('jobs')->sole()->payload, true, flags: JSON_THROW_ON_ERROR);
             expect($payload['data']['nvl_ownership']['owner']['key'])->toBe('7');
+        });
+    } finally {
+        unlink($path);
+    }
+});
+
+it('suppresses a fully completed chunk replay under the same admitted owner', function (): void {
+    $path = tempnam(sys_get_temp_dir(), 'nvl_csv_');
+    file_put_contents($path, "name\nReplay protected\n");
+    try {
+        app(OwnershipRunner::class)->run(Company::query()->findOrFail(7), Actor::query()->findOrFail(1), function () use ($path): void {
+            app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('ownership-rows')->processAsync();
+            $payload = json_decode(DB::table('jobs')->sole()->payload, true, flags: JSON_THROW_ON_ERROR);
+            $job = unserialize($payload['data']['command']);
+            $job->handle(app(CSVWorkStore::class), app(CSVHandlerRegistry::class));
+            $job->handle(app(CSVWorkStore::class), app(CSVHandlerRegistry::class));
+
+            expect(DB::table('ownership_queue_probes')->where('stage', 'csv-row')->count())->toBe(1);
         });
     } finally {
         unlink($path);

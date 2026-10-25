@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Nvl\Csv\Tests;
 
 use Nvl\Csv\Providers\CsvServiceProvider;
-use Nvl\Data\Providers\DataServiceProvider;
 use Nvl\Support\Providers\LocaleServiceProvider;
 use Orchestra\Testbench\TestCase as Orchestra;
 
@@ -24,7 +23,6 @@ abstract class TestCase extends Orchestra
     {
         return [
             LocaleServiceProvider::class,
-            DataServiceProvider::class,
             CsvServiceProvider::class,
         ];
     }

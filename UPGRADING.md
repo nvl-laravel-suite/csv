@@ -1,66 +1,23 @@
-# Upgrading NVL CSV
+# Upgrading NVL CSV to Light
 
-## Major 6 ownership rollout
+Upgrade CSV and its selected NVL dependency closure together to the transitional `^6.0` line. The Laravel floor is 13 and PHP floor is 8.4. Install Laravel Testbench `^11.0` for host package tests.
 
-Capture native ownership for queued imports/exports and deny source restoration outside admitted work. Preserve bounded processing, host handlers and quiet logging defaults.
+## Replace the runtime API
 
-Upgrade the selected NVL dependency closure together to `^6.0`. Ordinary unowned hosts retain the default unscoped declarations and need no ownership context. For isolation, use the installed Ownership README and UPGRADING guide, exact configured subclasses and reviewed adoption before accepting traffic. Disabling or removing Ownership is not rollback; Core retains durable denial guards. Keep existing tenant IDs and migration history. The explicit Tenancy bridge remains deprecated through major 6; its retirement is a separate reviewed migration no earlier than major 7.
+- Replace `CSVAnalyzerService` with `CsvAnalyzer`; use `analyze($path)`, `analyzeDisk($disk, $path)`, or `quickAnalyze($path)` and read snake_case result arrays.
+- Replace `CSVImport` with `CsvImporter` and `CSVExport` with `CsvExporter`. The concrete services own parsing, validation, transaction, and export guarantees. Their native `import($path, $options, $handler)` and `export($rows, $options)` operations use arrays. Existing fluent behavior is available through the native classes where documented in the README.
+- Replace `CSVAnalysisResultData`, import/export options Data, progress Data, and import/export result objects with documented array shapes. Move HTTP DTOs, Actions, and generated TypeScript types into the consuming application. There is no package Data or TypeScript runtime provider.
+- Replace former service contract injection with native services and the `CSVRowHandler` boundary. `CSVFieldMapping`, `CSVWorkReference`, and `CSVConfiguration` remain because they enforce mapping, work identity, and CSV dialect invariants.
+- Use snake_case option keys. Unknown keys and invalid types fail rather than being silently accepted. Export values that could be spreadsheet formulas are escaped by default; select `reject` or explicitly `allow` through `formula_policy`.
 
+## Queue migration
 
-## Consumer contracts, committed events and runtime policy (5.x)
+Drain or cancel old CSV jobs and staged manifests before deploying the native worker. They contain retired callback or Tenancy payloads and cannot be restored through the new work reference. Register versioned `CSVRowHandler` classes through `CSVHandlerRegistry` at application boot and enqueue by alias with `CSVAsyncProcessor::usingHandler()`. Queued consumer closures, callback-bearing field mappings, and arbitrary object options are refused.
 
-Prefer focused public interfaces in constructor injection; native implementations remain container defaults and host prebindings win. Returned models are documented identity/data handles: use package contracts for reads/writes and capability-specific batch readers instead of direct package queries. Enable the shipped Core PHPStan include in your host; do not invoke the suite workbench static audit command in a consumer.
+Configure a shared private work disk, Laravel's queue batch repository, and workers with `retry_after` above the 300 second job timeout. Native Ownership captures and re-admits worker context; the retired `TenantContext`, `TenantRunner`, and legacy work-store fallback are removed. A null owner context is never an authority grant. The optional `nvl/ownership` integration must be configured explicitly. `CSVWorkReference` now carries a native Ownership envelope.
 
-Events now carry immutable schemaVersion=1 and scalar/DTO snapshots. Replace model-bearing event fields with the IDs listed in [events](docs/events.md); load only through an authorized public reader when needed. Only six declared legacy `*Event` names are retained as PHP aliases for major 5, removal no earlier than major 6. Migrate exact imports/listeners/fakes to canonical names, replace suffix wildcard patterns explicitly, drain old queued payloads, rebuild event caches and restart workers. Framework Verified/PasswordReset remain native classes. Source-connection callbacks are process-local after-commit publication, not a durable outbox or exactly-once delivery.
+CSV chunk checksums and completion seals protect staged work and suppress replay after a complete chunk. A retry after a partial handler failure can repeat prior row side effects. Use application idempotency keys or transactions appropriate to the handler's target system. Do not infer exactly-once external effects from the queue batch status.
 
-Package failures have a marker and optional response metadata. Opt into Core's JSON renderer deliberately; preserve existing host handlers and request-locale selection. Missing required host adapters produce `binding_required`/500; genuine configured authorization denial retains native handling. See the README error table and required-bindings section where applicable.
+## Operational checks
 
-Factories ship in runtime package mappings for host tests. Ordinary make may persist parents; withoutParents()->make creates detached fixtures. Supply persisted native owners/parents and active tenants explicitly, retain source revisions, and never treat a factory row as a real storage/provider/workflow effect. Core's optional installer publishes common config without enabling features; strict Doctor and explicit deployment cache/worker steps belong in the host release process. The PHP 8.4/Laravel 13 local Dagger release gate and fresh public Composer installation passed for 5.0.0. Additional compatibility legs need separate evidence; hosts must verify their own adoption.
-
-
-## Tenant queue adoption
-
-Drain legacy `csv-processing` manifests before tenancy activation. Register
-stable handler aliases/classes, use `usingHandler()`, and keep handlers routed
-through domain Actions. Disabled consumers retain the existing closure API.
-
-## Standard CSV escaping
-
-Defaults, format presets, and analyzer reads now disable PHP's proprietary
-escape mechanism with an empty escape string. Embedded quotes use doubled
-enclosures, preserving quotes and trailing backslashes across CSV round trips.
-
-For a legacy import that intentionally uses backslash escaping, set
-`new CSVConfiguration(escape: '\\')` or the equivalent explicit import DTO
-option. Custom escape settings remain supported.
-
-## Migrating from `App\Lib\CSV` to 1.0
-
-Version 1.0 preserves the original class names and public fluent methods under the package namespace.
-
-1. Replace `App\Lib\CSV\...` imports with `Nvl\Csv\...`.
-2. Replace host `App\Traits\DataTransform` assumptions with the `Nvl\Data` DTO behavior now provided by `nvl/core`; no consumer trait import is required.
-3. Keep `CSVFieldMapping::withTransformer(...)` as a static factory.
-4. Confirm export paths. Fluent export builders default to the `exports` directory; directly constructed option DTOs without `path` write at the disk root.
-5. Confirm duplicate behavior. `SKIP` and `ERROR` are enforced within the source file; persistence-oriented strategies pass duplicates to the application processor.
-6. For async processing, create Laravel’s queue batch table, run workers for the effective CSV queue, and ensure captured callback state is serializable. Package `nvl-csv.queue.connection` and `nvl-csv.queue.name` overrides take priority, then Core queue defaults, then Laravel's selected connection and queue. Null inherits and explicit `sync` is preserved. Drain jobs queued under the old `csv-processing` default before restarting workers with the new effective queue.
-7. Remove calls copied from the legacy prose documentation that never existed in the implementation, including instance `withTransformer`, `StringTransformer::make`, `lowercase` fluent methods, `nullIfEmpty`, `limit`, and importer `withDelimiter`.
-
-The package now honors import/export DTO mappings and format/encoding options, resets reusable service state, handles variable-length BOMs, streams remote disks, and serializes queued callbacks. Strict imports reject uneven rows; lenient imports preserve the legacy pad/truncate behavior. Failure counters remain complete while only the first 1,000 failed-row payloads and error strings are retained. Test encoding, strictness, failure-reporting, and queue behavior when migrating workloads that depended on the previous accidental behavior.
-
-## Tagged consumer PHP boundary
-
-Use source `@api` workflows, extension contracts, and value types for application integration. Direct use of untagged implementations or `@internal` members is unsupported. This classification keeps existing concrete Action signatures and runtime behavior; it does not authorize package model persistence, ad hoc queries, relation traversal, or generic model serialization. Returned models are identity/result handles with only the explicitly declared in-memory read fields described in the README.
-
-## Application workflow contracts
-
-The four CSV service interfaces copy the native public instance methods (3 analyzer, 22 import, 12 export, 13 async). Mutable defaults remain transient; static factories and direct constructors remain callable.
-
-The supported workflow injection names are `CSVAnalyzerContract`, `CSVImportContract`, `CSVExportContract`, `CSVAsyncProcessorContract`.
-
-Inject these contracts when application workflows need substitution. Native
-concrete constructors and operation signatures remain available through major 5;
-internal workflow chains are unchanged. Register host implementations before
-package discovery or replace the contract before resolving a new host service.
-See [Testing your app](README.md#testing-your-app) for native fixtures and the
-shipped consumer-audit PHPStan configuration.
+Port host tests to native arrays, registered handlers, and the selected database connection. Verify quoted fields, encodings, malformed rows, duplicate policy, rollback, formula handling, ownership admission, manifest tampering, cancellation, and retries. Restart queue workers after the new handler registry is deployed. See the [README](README.md) for current examples.

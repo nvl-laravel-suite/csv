@@ -12,13 +12,12 @@ use Exception;
 use Generator;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
-use Nvl\Csv\Contracts\CSVImportContract;
-use Nvl\Csv\Data\CSVImportOptionsData;
-use Nvl\Csv\Data\CSVProgressData;
+use Nvl\Csv\Contracts\CSVRowHandler;
+use Nvl\Csv\Enums\CSVDelimiterEnum;
 use Nvl\Csv\Enums\CSVDuplicateStrategyEnum;
 use Nvl\Csv\Enums\CSVEncodingEnum;
 use Nvl\Csv\Enums\CSVErrorLevelEnum;
-use Nvl\Csv\Enums\CSVOperationStatusEnum;
+use Nvl\Csv\Enums\CSVProcessingModeEnum;
 use Nvl\Csv\Enums\CSVTypeEnum;
 use Nvl\Csv\Exceptions\CSVConfigurationException;
 use Nvl\Csv\Exceptions\CSVFileNotFoundException;
@@ -29,9 +28,7 @@ use Nvl\Csv\Support\CSVMemoryManager;
 use Nvl\Csv\Support\CSVTransactionRunner;
 use Nvl\Csv\ValueObjects\CSVConfiguration;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
-use Nvl\Csv\ValueObjects\CSVImportResult;
 use RuntimeException;
-use Spatie\LaravelData\Optional;
 use Throwable;
 
 /**
@@ -49,13 +46,16 @@ use Throwable;
  *
  * @api
  */
-final class CSVImport implements CSVImportContract
+final class CsvImporter
 {
     private const MAX_RETAINED_FAILURES = 1000;
 
     private CSVConfiguration $configuration;
 
-    private ?CSVImportOptionsData $options = null;
+    /** @var array<string,mixed> */
+    private array $options = [];
+
+    private ?CSVRowHandler $activeHandler = null;
 
     private CSVMemoryManager $memoryManager;
 
@@ -100,7 +100,8 @@ final class CSVImport implements CSVImportContract
     /** @var array<array{level: CSVErrorLevelEnum, message: string, row?: int|null}> */
     private array $warnings = [];
 
-    private ?CSVProgressData $progress = null;
+    /** @var array<string,mixed>|null */
+    private ?array $progress = null;
 
     private CSVDuplicateStrategyEnum $duplicateStrategy = CSVDuplicateStrategyEnum::SKIP;
 
@@ -139,6 +140,32 @@ final class CSVImport implements CSVImportContract
     }
 
     /**
+     * Import with a host handler inside the selected connection transaction.
+     *
+     * @param  array<string,mixed>  $options  Parsing, mapping, duplicate and transaction options.
+     * @return array<string,mixed>
+     */
+    public function import(string $path, array $options, CSVRowHandler $handler): array
+    {
+        $this->withOptions($options);
+        $this->fromFile($path);
+        $this->activeHandler = $handler;
+        try {
+            return $this->runImport();
+        } finally {
+            $this->activeHandler = null;
+        }
+    }
+
+    /** Execute a configured synchronous import, including its local row callback. @internal
+     * @return array<string,mixed>
+     */
+    public function run(): array
+    {
+        return $this->runImport();
+    }
+
+    /**
      * Create a new import instance with fluent API.
      *
      * Static factory method for creating CSV import instances using
@@ -168,66 +195,143 @@ final class CSVImport implements CSVImportContract
     }
 
     /**
-     * Set import options from a structured DTO.
+     * Set import options from a documented array.
      *
      * Applies import-specific options and merges them with the current configuration.
-     * Handles Optional values from Spatie Data and updates configuration accordingly.
+     * Validates option keys and values before updating configuration.
      *
-     * @param  CSVImportOptionsData  $options  Import options including file path, encoding, and processing settings
+     * @param  array  $options  Import options including file path, encoding, and processing settings
      * @return self Returns this instance for method chaining
      */
-    public function withOptions(CSVImportOptionsData $options): self
+    /** @param array<string,mixed> $options */
+    public function withOptions(array $options): self
     {
-        $this->options = $options;
-
-        $delimiter = $this->configuration->delimiter;
-        if (! ($options->delimiter instanceof Optional)) {
-            $delimiter = $options->delimiter->getCharacter();
+        $allowed = ['file_path', 'delimiter', 'enclosure', 'escape', 'processing_mode', 'chunk_size', 'skip_rows', 'limit_rows', 'has_headers', 'column_mapping', 'column_types', 'skip_empty_rows', 'trim_values', 'validate_data', 'strict_mode', 'encoding', 'memory_limit', 'unique_fields', 'duplicate_strategy', 'metadata', 'transaction', 'connection', 'field_mappings'];
+        if (array_diff(array_keys($options), $allowed) !== []) {
+            throw new CSVConfigurationException('Unknown CSV import option.');
         }
-
-        $enclosure = $options->enclosure instanceof Optional ? $this->configuration->enclosure : $options->enclosure;
-        $escape = $options->escape instanceof Optional ? $this->configuration->escape : $options->escape;
-        $includeHeaders = $options->hasHeaders instanceof Optional ? $this->configuration->includeHeaders : $options->hasHeaders;
-        $skipEmptyRows = $options->skipEmptyRows instanceof Optional ? $this->configuration->skipEmptyRows : $options->skipEmptyRows;
-        $trimValues = $options->trimValues instanceof Optional ? $this->configuration->trimValues : $options->trimValues;
-        $memoryLimit = $options->memoryLimit instanceof Optional ? $this->configuration->memoryLimit : $options->memoryLimit;
-        $processingMode = $options->processingMode instanceof Optional ? $this->configuration->processingMode : $options->processingMode;
-        $chunkSize = $options->chunkSize instanceof Optional ? $this->configuration->chunkSize : $options->chunkSize;
-        $strictMode = $options->strictMode instanceof Optional ? $this->configuration->strictMode : $options->strictMode;
-
+        $delimiter = $options['delimiter'] ?? $this->configuration->delimiter;
+        if ($delimiter instanceof CSVDelimiterEnum) {
+            $delimiter = $delimiter->getCharacter();
+        }
+        if (! is_string($delimiter)) {
+            throw new CSVConfigurationException('CSV delimiter must be a character or delimiter enum.');
+        }
+        $processingMode = $options['processing_mode'] ?? $this->configuration->processingMode;
+        if (! $processingMode instanceof CSVProcessingModeEnum) {
+            throw new CSVConfigurationException('CSV processing mode is invalid.');
+        }
+        $encoding = $options['encoding'] ?? null;
+        if ($encoding !== null && ! $encoding instanceof CSVEncodingEnum) {
+            throw new CSVConfigurationException('CSV encoding is invalid.');
+        }
+        $duplicateStrategy = $options['duplicate_strategy'] ?? null;
+        if ($duplicateStrategy !== null && ! $duplicateStrategy instanceof CSVDuplicateStrategyEnum) {
+            throw new CSVConfigurationException('CSV duplicate strategy is invalid.');
+        }
+        $uniqueFields = self::arrayOption($options, 'unique_fields');
+        $fieldMappings = self::arrayOption($options, 'field_mappings');
+        self::arrayOption($options, 'column_mapping');
+        self::arrayOption($options, 'column_types');
+        self::arrayOption($options, 'metadata');
+        self::intOption($options, 'skip_rows', 0);
+        self::intOption($options, 'limit_rows', null);
+        self::boolOption($options, 'validate_data', true);
+        if (array_key_exists('file_path', $options)) {
+            self::stringOption($options, 'file_path', '');
+        }
         $this->configuration = new CSVConfiguration(
             delimiter: $delimiter,
-            enclosure: $enclosure,
-            escape: $escape,
+            enclosure: self::stringOption($options, 'enclosure', $this->configuration->enclosure),
+            escape: self::stringOption($options, 'escape', $this->configuration->escape),
             lineEnding: $this->configuration->lineEnding,
             includeBOM: $this->configuration->includeBOM,
-            includeHeaders: $includeHeaders,
+            includeHeaders: self::boolOption($options, 'has_headers', $this->configuration->includeHeaders),
             includeIndex: $this->configuration->includeIndex,
-            chunkSize: $chunkSize,
+            chunkSize: self::intOption($options, 'chunk_size', $this->configuration->chunkSize),
             processingMode: $processingMode,
             exportFormat: $this->configuration->exportFormat,
             encoding: $this->configuration->encoding,
-            memoryLimit: $memoryLimit,
-            strictMode: $strictMode,
-            skipEmptyRows: $skipEmptyRows,
-            trimValues: $trimValues,
+            memoryLimit: self::intOption($options, 'memory_limit', $this->configuration->memoryLimit),
+            strictMode: self::boolOption($options, 'strict_mode', $this->configuration->strictMode),
+            skipEmptyRows: self::boolOption($options, 'skip_empty_rows', $this->configuration->skipEmptyRows),
+            trimValues: self::boolOption($options, 'trim_values', $this->configuration->trimValues),
         );
-
-        if (! ($options->encoding instanceof Optional)) {
-            $this->encoding = $options->encoding;
+        if ($encoding !== null) {
+            $this->encoding = $encoding;
         }
-        if (! ($options->duplicateStrategy instanceof Optional)) {
-            $this->duplicateStrategy = $options->duplicateStrategy;
+        if ($duplicateStrategy !== null) {
+            $this->duplicateStrategy = $duplicateStrategy;
         }
-        if (! ($options->uniqueFields instanceof Optional)) {
-            foreach ($options->uniqueFields as $field) {
-                $this->detectDuplicates($field);
+        foreach ($uniqueFields as $field) {
+            if (! is_string($field)) {
+                throw new CSVConfigurationException('Unique fields must be field names.');
             }
+            $this->detectDuplicates($field);
+        }
+        if (isset($options['transaction'])) {
+            $this->withTransaction(self::boolOption($options, 'transaction', true));
+        }
+        if (isset($options['connection'])) {
+            $this->onConnection(self::stringOption($options, 'connection', ''));
+        }
+        $this->applyOptionFieldMappings($options);
+        foreach ($fieldMappings as $source => $mapping) {
+            if (! is_string($source) || ! $mapping instanceof CSVFieldMapping) {
+                throw new CSVConfigurationException('Field mappings require named CSVFieldMapping values.');
+            }
+            $this->mapField($source, $mapping->targetField, $mapping);
         }
 
-        $this->applyOptionFieldMappings($options);
+        $this->options = $options;
 
         return $this;
+    }
+
+    /** @param array<string,mixed> $options */
+    private static function stringOption(array $options, string $key, string $default): string
+    {
+        $value = $options[$key] ?? $default;
+        if (! is_string($value)) {
+            throw new CSVConfigurationException("CSV option [{$key}] must be a string.");
+        }
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $options */
+    private static function boolOption(array $options, string $key, bool $default): bool
+    {
+        $value = $options[$key] ?? $default;
+        if (! is_bool($value)) {
+            throw new CSVConfigurationException("CSV option [{$key}] must be a boolean.");
+        }
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $options */
+    private static function intOption(array $options, string $key, ?int $default): ?int
+    {
+        $value = $options[$key] ?? $default;
+        if ($value !== null && ! is_int($value)) {
+            throw new CSVConfigurationException("CSV option [{$key}] must be an integer or null.");
+        }
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $options
+     * @return array<array-key,mixed>
+     */
+    private static function arrayOption(array $options, string $key): array
+    {
+        $value = $options[$key] ?? [];
+        if (! is_array($value)) {
+            throw new CSVConfigurationException("CSV option [{$key}] must be an array.");
+        }
+
+        return $value;
     }
 
     /**
@@ -248,9 +352,7 @@ final class CSVImport implements CSVImportContract
             throw CSVFileNotFoundException::fileNotFound($path);
         }
 
-        $this->options = CSVImportOptionsData::from(
-            array_merge($this->options?->toArray() ?? [], ['filePath' => $path])
-        );
+        $this->options = array_merge($this->options, ['file_path' => $path]);
         $this->sourceDisk = null;
         $this->sourcePath = null;
 
@@ -280,9 +382,7 @@ final class CSVImport implements CSVImportContract
 
         $this->sourceDisk = $disk;
         $this->sourcePath = $path;
-        $this->options = CSVImportOptionsData::from(
-            array_merge($this->options?->toArray() ?? [], ['filePath' => "{$disk}://{$path}"])
-        );
+        $this->options = array_merge($this->options, ['file_path' => "{$disk}://{$path}"]);
 
         return $this;
     }
@@ -524,7 +624,8 @@ final class CSVImport implements CSVImportContract
     /**
      * Get the latest progress snapshot for the current import.
      */
-    public function getProgress(): ?CSVProgressData
+    /** @return array<string,mixed>|null */
+    public function getProgress(): ?array
     {
         return $this->progress;
     }
@@ -536,7 +637,7 @@ final class CSVImport implements CSVImportContract
      * data processing, and transaction management. Returns comprehensive results
      * including success/failure statistics and error details.
      *
-     * @return CSVImportResult Complete import results with statistics and error information
+     * @return array Complete import results with statistics and error information
      *
      * @throws CSVConfigurationException If import configuration is invalid or missing
      * @throws CSVFileNotFoundException If the specified file cannot be found or accessed
@@ -546,7 +647,8 @@ final class CSVImport implements CSVImportContract
      * @throws RuntimeException If file operations or system resources fail
      * @throws Throwable If database transactions fail or other critical errors occur
      */
-    public function import(): CSVImportResult
+    /** @return array<string,mixed> */
+    private function runImport(): array
     {
         $this->validateConfiguration();
         $this->openFile();
@@ -562,7 +664,7 @@ final class CSVImport implements CSVImportContract
                 )
                 : $this->processFile();
         } catch (Throwable $e) {
-            $this->progress = $this->progress?->fail($e->getMessage(), CSVErrorLevelEnum::CRITICAL);
+            $this->progress = ['status' => 'failed', 'error' => $e->getMessage()];
             throw $e;
         } finally {
             $this->closeFile();
@@ -597,8 +699,8 @@ final class CSVImport implements CSVImportContract
             $this->readHeaders();
             $this->validateHeaders();
 
-            $skipRows = $this->options?->getSkipRows() ?? 0;
-            $limitRows = $this->options?->getLimitRows();
+            $skipRows = $this->options['skip_rows'] ?? 0;
+            $limitRows = $this->options['limit_rows'] ?? null;
             $processedRows = 0;
 
             while (($row = $this->readNextRow()) !== false) {
@@ -646,12 +748,13 @@ final class CSVImport implements CSVImportContract
      *
      * @param  int  $batchSize  Number of rows to process in each batch
      * @param  Closure  $batchProcessor  Callback function (array $batchData, int $batchNumber) => void
-     * @return CSVImportResult Complete import results with batch processing statistics
+     * @return array Complete import results with batch processing statistics
      *
      * @throws Error If PHP encounters a fatal error during batch processing
      * @throws Exception If batch processor throws an exception or other errors occur
      */
-    public function batch(int $batchSize, Closure $batchProcessor): CSVImportResult
+    /** @return array<string,mixed> */
+    public function batch(int $batchSize, Closure $batchProcessor): array
     {
         if ($batchSize < 1) {
             throw new InvalidArgumentException('Batch size must be at least 1.');
@@ -664,8 +767,8 @@ final class CSVImport implements CSVImportContract
             $this->readHeaders();
             $this->validateHeaders();
 
-            $skipRows = $this->options?->getSkipRows() ?? 0;
-            $limitRows = $this->options?->getLimitRows();
+            $skipRows = $this->options['skip_rows'] ?? 0;
+            $limitRows = $this->options['limit_rows'] ?? null;
             $processedRows = 0;
 
             $batch = [];
@@ -726,11 +829,8 @@ final class CSVImport implements CSVImportContract
      */
     private function validateConfiguration(): void
     {
-        if (! isset($this->options)) {
-            $this->options = CSVImportOptionsData::from(CSVImportOptionsData::defaults());
-        }
 
-        if (empty($this->options->filePath)) {
+        if (empty($this->options['file_path'])) {
             throw CSVConfigurationException::missingConfiguration('filePath');
         }
 
@@ -753,11 +853,7 @@ final class CSVImport implements CSVImportContract
      */
     private function openFile(): void
     {
-        if ($this->options === null) {
-            throw CSVConfigurationException::missingConfiguration('options');
-        }
-
-        $filePath = $this->options->filePath;
+        $filePath = self::stringOption($this->options, 'file_path', '');
         $handle = $this->sourceDisk !== null && $this->sourcePath !== null
             ? Storage::disk($this->sourceDisk)->readStream($this->sourcePath)
             : fopen($filePath, 'rb');
@@ -821,10 +917,10 @@ final class CSVImport implements CSVImportContract
      */
     private function reopenSource(): void
     {
-        $filePath = $this->options?->filePath;
+        $filePath = self::stringOption($this->options, 'file_path', '');
         $handle = $this->sourceDisk !== null && $this->sourcePath !== null
             ? Storage::disk($this->sourceDisk)->readStream($this->sourcePath)
-            : ($filePath === null ? false : fopen($filePath, 'rb'));
+            : fopen($filePath, 'rb');
 
         if (! is_resource($handle)) {
             throw new RuntimeException('Unable to reopen CSV input stream.');
@@ -876,6 +972,7 @@ final class CSVImport implements CSVImportContract
             if ($headers === false) {
                 throw CSVParseException::invalidHeaders();
             }
+            $this->assertValidUtf8($headers, 1);
 
             // Trim headers if configured and filter out nulls
             if ($this->configuration->trimValues) {
@@ -896,6 +993,7 @@ final class CSVImport implements CSVImportContract
             if ($firstRow === false) {
                 throw CSVParseException::invalidHeaders();
             }
+            $this->assertValidUtf8($firstRow, 1);
 
             $this->pendingRow = $firstRow;
 
@@ -972,6 +1070,7 @@ final class CSVImport implements CSVImportContract
         }
 
         $this->currentRow++;
+        $this->assertValidUtf8($row, $this->currentRow);
 
         // Check memory before processing
         if (! $this->memoryManager->canAllocate(1024)) {
@@ -982,6 +1081,16 @@ final class CSVImport implements CSVImportContract
         }
 
         return $row;
+    }
+
+    /** @param array<int,string|null> $row */
+    private function assertValidUtf8(array $row, int $line): void
+    {
+        foreach ($row as $value) {
+            if (is_string($value) && ! mb_check_encoding($value, 'UTF-8')) {
+                throw CSVParseException::invalidEncoding('UTF-8', $line);
+            }
+        }
     }
 
     /**
@@ -1095,6 +1204,8 @@ final class CSVImport implements CSVImportContract
             }
         }
 
+        $this->activeHandler?->process($processedData, $this->currentRow);
+
         return $processedData;
     }
 
@@ -1182,11 +1293,8 @@ final class CSVImport implements CSVImportContract
 
         // Update progress if tracking
         if ($this->progress !== null) {
-            $this->progress = $this->progress->update([
-                'failedRows' => $this->failedRows,
-                'lastErrorLevel' => $errorLevel,
-                'lastErrorMessage' => $e->getMessage(),
-            ]);
+            $this->progress['failed_rows'] = $this->failedRows;
+            $this->progress['last_error'] = $e->getMessage();
         }
 
         if ($this->errorHandler !== null) {
@@ -1232,20 +1340,13 @@ final class CSVImport implements CSVImportContract
      */
     private function reportProgress(): void
     {
-        // Update internal progress tracking
-        if ($this->progress !== null) {
-            $this->progress = $this->progress->update([
-                'processedRows' => $this->currentRow,
-                'successfulRows' => $this->successfulRows,
-                'failedRows' => $this->failedRows,
-                'skippedRows' => $this->skippedRows,
-                'status' => CSVOperationStatusEnum::RUNNING,
-            ]);
-        }
+        $this->progress = ['status' => 'running', 'processed_rows' => $this->currentRow,
+            'successful_rows' => $this->successfulRows, 'failed_rows' => $this->failedRows,
+            'skipped_rows' => $this->skippedRows];
 
         // Call user callback
         if ($this->progressCallback !== null && $this->currentRow % 100 === 0) {
-            $progressData = $this->progress?->getProgressBarData() ?? [
+            $progressData = $this->progress ?? [
                 'current_row' => $this->currentRow,
                 'successful' => $this->successfulRows,
                 'failed' => $this->failedRows,
@@ -1264,7 +1365,7 @@ final class CSVImport implements CSVImportContract
      * handles errors, and tracks progress. Used by the main import() method
      * for complete file processing.
      *
-     * @return CSVImportResult Final import results with complete statistics
+     * @return array Final import results with complete statistics
      *
      * @throws CSVMemoryException If memory limits are exceeded during processing
      * @throws CSVValidationException If row validation fails
@@ -1272,10 +1373,11 @@ final class CSVImport implements CSVImportContract
      * @throws Exception If unexpected errors occur during processing
      * @throws DivisionByZeroError If progress calculations encounter division by zero
      */
-    private function processFile(): CSVImportResult
+    /** @return array<string,mixed> */
+    private function processFile(): array
     {
-        $skipRows = $this->options?->getSkipRows() ?? 0;
-        $limitRows = $this->options?->getLimitRows();
+        $skipRows = $this->options['skip_rows'] ?? 0;
+        $limitRows = $this->options['limit_rows'] ?? null;
         $processedRows = 0;
 
         while (($row = $this->readNextRow()) !== false) {
@@ -1320,41 +1422,43 @@ final class CSVImport implements CSVImportContract
      * and metadata into a structured result object that provides complete
      * information about the import operation.
      *
-     * @return CSVImportResult Complete import result with statistics, errors, and metadata
+     * @return array Complete import result with statistics, errors, and metadata
      */
-    private function createResult(): CSVImportResult
+    /** @return array<string,mixed> */
+    private function createResult(): array
     {
         $processingTime = microtime(true) - $this->startTime;
-        $this->progress = $this->progress?->complete();
-        $metadata = $this->options?->metadata;
+        $this->progress = ['status' => 'complete', 'processed_rows' => $this->currentRow];
+        $metadata = $this->options['metadata'] ?? null;
         $optionMetadata = is_array($metadata) ? $metadata : [];
 
-        return new CSVImportResult(
-            totalRows: $this->currentRow,
-            processedRows: $this->successfulRows + $this->failedRows,
-            successfulRows: $this->successfulRows,
-            failedRows: $this->failedRows,
-            skippedRows: $this->skippedRows,
-            failedRowsData: $this->failedRowsData,
-            processingTime: $processingTime,
-            startedAt: Carbon::createFromTimestamp($this->startTime),
-            completedAt: Carbon::now(),
-            errors: array_values(array_map(fn ($e) => $e['message'], $this->errors)),
-            warnings: array_values(array_map(fn ($w) => $w['message'], $this->warnings)),
-            metadata: array_merge($optionMetadata, [
+        return [
+            'total_rows' => $this->currentRow,
+            'processed_rows' => $this->successfulRows + $this->failedRows,
+            'successful_rows' => $this->successfulRows,
+            'failed_rows' => $this->failedRows,
+            'skipped_rows' => $this->skippedRows,
+            'failed_rows_data' => $this->failedRowsData,
+            'processing_time' => $processingTime,
+            'started_at' => Carbon::createFromTimestamp($this->startTime),
+            'completed_at' => Carbon::now(),
+            'errors' => array_values(array_map(fn ($e) => $e['message'], $this->errors)),
+            'warnings' => array_values(array_map(fn ($w) => $w['message'], $this->warnings)),
+            'metadata' => array_merge($optionMetadata, [
                 'memory_peak' => $this->memoryManager->getPeakUsage(),
-                'file_path' => $this->options->filePath ?? null,
-            ])
-        );
+                'file_path' => $this->options['file_path'] ?? null,
+            ]),
+        ];
     }
 
     /**
      * Build fluent field mappings from structured DTO options.
      */
-    private function applyOptionFieldMappings(CSVImportOptionsData $options): void
+    /** @param array<string,mixed> $options */
+    private function applyOptionFieldMappings(array $options): void
     {
-        $columnMappings = $options->columnMapping instanceof Optional ? [] : $options->columnMapping;
-        $columnTypes = $options->columnTypes instanceof Optional ? [] : $options->columnTypes;
+        $columnMappings = self::arrayOption($options, 'column_mapping');
+        $columnTypes = self::arrayOption($options, 'column_types');
         $sourceFields = $this->optionSourceFields($columnMappings, $columnTypes);
 
         foreach ($sourceFields as $sourceField) {
@@ -1429,7 +1533,7 @@ final class CSVImport implements CSVImportContract
      */
     private function shouldValidateData(): bool
     {
-        return $this->options?->shouldValidate() ?? true;
+        return self::boolOption($this->options, 'validate_data', true);
     }
 
     /**
@@ -1453,7 +1557,7 @@ final class CSVImport implements CSVImportContract
             $this->uniqueIndexes[$field] = [];
         }
 
-        $this->progress = CSVProgressData::initial(uniqid('csv_import_', true), 0);
+        $this->progress = ['status' => 'pending', 'processed_rows' => 0];
     }
 
     /**

@@ -6,7 +6,6 @@ namespace Nvl\Csv\Support;
 
 use Closure;
 use Illuminate\Support\Facades\DB;
-use Nvl\Csv\ValueObjects\CSVImportResult;
 use Throwable;
 
 /**
@@ -19,9 +18,10 @@ final readonly class CSVTransactionRunner
     /**
      * Execute an import and commit only a fully successful result.
      *
-     * @param  Closure(): CSVImportResult  $operation
+     * @param  Closure(): array<string,mixed>  $operation
+     * @return array<string,mixed>
      */
-    public function import(?string $connection, Closure $operation): CSVImportResult
+    public function import(?string $connection, Closure $operation): array
     {
         $database = DB::connection($connection);
         $transactionStarted = false;
@@ -31,7 +31,7 @@ final readonly class CSVTransactionRunner
             $transactionStarted = true;
             $result = $operation();
 
-            if ($result->isSuccessful()) {
+            if (($result['failed_rows'] ?? 0) === 0) {
                 $database->commit();
             } else {
                 $database->rollBack();

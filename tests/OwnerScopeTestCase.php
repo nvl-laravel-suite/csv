@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Providers\CsvServiceProvider;
 use Nvl\Csv\Services\CSVHandlerRegistry;
 use Nvl\Csv\Tests\Fixtures\OwnershipRowHandler;
-use Nvl\Data\Providers\DataServiceProvider;
 use Nvl\Ownership\Tests\Fixtures\Queue\QueueScenario;
 use Nvl\Ownership\Tests\Fixtures\Resources\ResourceScenario;
 use Nvl\Ownership\Tests\OwnershipTestCase;
@@ -18,7 +17,7 @@ abstract class OwnerScopeTestCase extends OwnershipTestCase
 {
     protected function getPackageProviders($app): array
     {
-        return [...parent::getPackageProviders($app), DataServiceProvider::class, CsvServiceProvider::class];
+        return [...parent::getPackageProviders($app), CsvServiceProvider::class];
     }
 
     protected function defineEnvironment($app): void

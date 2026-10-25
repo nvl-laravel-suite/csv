@@ -15,15 +15,15 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
 use JsonException;
-use Nvl\Csv\Contracts\CSVExportContract;
-use Nvl\Csv\Data\CSVExportOptionsData;
+use Nvl\Csv\Enums\CSVDelimiterEnum;
+use Nvl\Csv\Enums\CSVEncodingEnum;
+use Nvl\Csv\Enums\CSVExportFormatEnum;
+use Nvl\Csv\Enums\CSVProcessingModeEnum;
 use Nvl\Csv\Exceptions\CSVConfigurationException;
 use Nvl\Csv\Exceptions\CSVMemoryException;
 use Nvl\Csv\Support\CSVMemoryManager;
 use Nvl\Csv\ValueObjects\CSVConfiguration;
-use Nvl\Csv\ValueObjects\CSVExportResult;
 use RuntimeException;
-use Spatie\LaravelData\Optional;
 use Stringable;
 use Throwable;
 
@@ -36,11 +36,12 @@ use Throwable;
  *
  * @api
  */
-final class CSVExport implements CSVExportContract
+final class CsvExporter
 {
     private CSVConfiguration $configuration;
 
-    private ?CSVExportOptionsData $options = null;
+    /** @var array<string,mixed> */
+    private array $options = [];
 
     private CSVMemoryManager $memoryManager;
 
@@ -84,6 +85,44 @@ final class CSVExport implements CSVExportContract
     }
 
     /**
+     * Stream rows through the CSV writer and return encoded bytes.
+     *
+     * @param  iterable<array-key,array<string,mixed>|Model>  $rows
+     * @param  array<string,mixed>  $options
+     */
+    public function export(iterable $rows, array $options): string
+    {
+        $this->withOptions(['filename' => 'export.csv', ...$options]);
+        $this->validateConfiguration();
+        $this->openFile();
+
+        try {
+            $this->writeHeaders();
+            $this->writeCollectionData($rows);
+            $output = $this->buildOutputStream();
+            try {
+                $statistics = fstat($output);
+                $bytes = is_array($statistics) ? $statistics['size'] : null;
+                if (! is_int($bytes) || $bytes < 0) {
+                    throw new RuntimeException('Unable to determine CSV output size.');
+                }
+                $required = $bytes > intdiv(PHP_INT_MAX, 2) ? PHP_INT_MAX : $bytes * 2;
+                $this->memoryManager->assertCanAllocate($required);
+                $contents = stream_get_contents($output);
+                if (! is_string($contents)) {
+                    throw new RuntimeException('Unable to read CSV output.');
+                }
+
+                return $contents;
+            } finally {
+                fclose($output);
+            }
+        } finally {
+            $this->closeFile();
+        }
+    }
+
+    /**
      * Create a new export instance with fluent API.
      *
      * Static factory method for creating CSV export instances using
@@ -113,73 +152,165 @@ final class CSVExport implements CSVExportContract
     }
 
     /**
-     * Set export options from a structured DTO.
+     * Set export options from a documented array.
      *
      * Applies export-specific options including output path, filename,
-     * column headings, and field mappings from a data transfer object.
+     * column headings, and field mappings from the caller.
      *
-     * @param  CSVExportOptionsData  $options  Export options including path, filename, and field configuration
+     * @param  array  $options  Export options including path, filename, and field configuration
      * @return self Returns this instance for method chaining
      */
-    public function withOptions(CSVExportOptionsData $options): self
+    /** @param array<string,mixed> $options */
+    public function withOptions(array $options): self
     {
-        $this->options = $options;
-        $baseConfiguration = $options->format instanceof Optional
-            ? $this->configuration
-            : CSVConfiguration::fromFormat($options->format);
-
-        $encoding = $options->encoding instanceof Optional
-            ? $baseConfiguration->encoding
-            : $options->encoding->getPhpEncoding();
-        $includeBom = $options->includeBom instanceof Optional
-            ? $baseConfiguration->includeBOM
-            : $options->includeBom;
-
-        if (! ($options->encoding instanceof Optional) && $options->encoding->hasBOM()) {
-            $includeBom = true;
+        $allowed = ['disk', 'path', 'filename', 'format', 'delimiter', 'enclosure', 'escape', 'include_bom', 'include_headers', 'include_index', 'processing_mode', 'chunk_size', 'headings', 'fields', 'encoding', 'memory_limit', 'metadata', 'formula_policy'];
+        if (array_diff(array_keys($options), $allowed) !== []) {
+            throw new CSVConfigurationException('Unknown CSV export option.');
         }
-
+        $format = $options['format'] ?? null;
+        if ($format !== null && ! $format instanceof CSVExportFormatEnum) {
+            throw new CSVConfigurationException('CSV export format is invalid.');
+        }
+        $base = $format === null ? $this->configuration : CSVConfiguration::fromFormat($format);
+        $encoding = $options['encoding'] ?? $base->encoding;
+        if ($encoding instanceof CSVEncodingEnum) {
+            $encoding = $encoding->getPhpEncoding();
+        }
+        if ($encoding !== null && ! is_string($encoding)) {
+            throw new CSVConfigurationException('CSV output encoding is invalid.');
+        }
+        $delimiter = $options['delimiter'] ?? $base->delimiter;
+        if ($delimiter instanceof CSVDelimiterEnum) {
+            $delimiter = $delimiter->getCharacter();
+        }
+        if (! is_string($delimiter)) {
+            throw new CSVConfigurationException('CSV output delimiter is invalid.');
+        }
+        $processingMode = $options['processing_mode'] ?? $base->processingMode;
+        if (! $processingMode instanceof CSVProcessingModeEnum) {
+            throw new CSVConfigurationException('CSV output processing mode is invalid.');
+        }
+        $this->fields = self::fieldsOption($options);
+        self::headingsOption($options);
+        foreach (['disk', 'path', 'filename'] as $key) {
+            if (array_key_exists($key, $options)) {
+                self::stringOption($options, $key, '');
+            }
+        }
+        self::arrayOption($options, 'metadata');
+        $formulaPolicy = self::stringOption($options, 'formula_policy', 'escape');
+        if (! in_array($formulaPolicy, ['escape', 'reject', 'allow'], true)) {
+            throw new CSVConfigurationException('CSV formula policy is invalid.');
+        }
         $this->configuration = new CSVConfiguration(
-            delimiter: $options->delimiter instanceof Optional
-                ? $baseConfiguration->delimiter
-                : $options->delimiter->getCharacter(),
-            enclosure: $options->enclosure instanceof Optional
-                ? $baseConfiguration->enclosure
-                : $options->enclosure,
-            escape: $options->escape instanceof Optional
-                ? $baseConfiguration->escape
-                : $options->escape,
-            lineEnding: $baseConfiguration->lineEnding,
-            includeBOM: $includeBom,
-            includeHeaders: $options->includeHeaders instanceof Optional
-                ? $baseConfiguration->includeHeaders
-                : $options->includeHeaders,
-            includeIndex: $options->includeIndex instanceof Optional
-                ? $baseConfiguration->includeIndex
-                : $options->includeIndex,
-            chunkSize: $options->chunkSize instanceof Optional
-                ? $baseConfiguration->chunkSize
-                : $options->chunkSize,
-            processingMode: $options->processingMode instanceof Optional
-                ? $baseConfiguration->processingMode
-                : $options->processingMode,
-            exportFormat: $options->format instanceof Optional
-                ? $baseConfiguration->exportFormat
-                : $options->format,
+            delimiter: $delimiter,
+            enclosure: self::stringOption($options, 'enclosure', $base->enclosure),
+            escape: self::stringOption($options, 'escape', $base->escape),
+            lineEnding: $base->lineEnding,
+            includeBOM: self::boolOption($options, 'include_bom', ($options['encoding'] ?? null) instanceof CSVEncodingEnum && $options['encoding']->hasBOM() ? true : $base->includeBOM),
+            includeHeaders: self::boolOption($options, 'include_headers', $base->includeHeaders),
+            includeIndex: self::boolOption($options, 'include_index', $base->includeIndex),
+            chunkSize: self::intOption($options, 'chunk_size', $base->chunkSize),
+            processingMode: $processingMode,
+            exportFormat: $format ?? $base->exportFormat,
             encoding: $encoding,
-            memoryLimit: $options->memoryLimit instanceof Optional
-                ? $baseConfiguration->memoryLimit
-                : $options->memoryLimit,
-            strictMode: $baseConfiguration->strictMode,
-            skipEmptyRows: $baseConfiguration->skipEmptyRows,
-            trimValues: $baseConfiguration->trimValues,
+            memoryLimit: self::intOption($options, 'memory_limit', $base->memoryLimit),
+            strictMode: $base->strictMode,
+            skipEmptyRows: $base->skipEmptyRows,
+            trimValues: $base->trimValues,
         );
-
-        if (! ($options->fields instanceof Optional)) {
-            $this->fields = array_values($options->fields);
-        }
+        $this->options = ['path' => '', ...$options];
 
         return $this;
+    }
+
+    /** @param array<string,mixed> $options */
+    private static function stringOption(array $options, string $key, string $default): string
+    {
+        $value = $options[$key] ?? $default;
+        if (! is_string($value)) {
+            throw new CSVConfigurationException("CSV option [{$key}] must be a string.");
+        }
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $options */
+    private static function boolOption(array $options, string $key, bool $default): bool
+    {
+        $value = $options[$key] ?? $default;
+        if (! is_bool($value)) {
+            throw new CSVConfigurationException("CSV option [{$key}] must be a boolean.");
+        }
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $options */
+    private static function intOption(array $options, string $key, ?int $default): ?int
+    {
+        $value = $options[$key] ?? $default;
+        if ($value !== null && ! is_int($value)) {
+            throw new CSVConfigurationException("CSV option [{$key}] must be an integer or null.");
+        }
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $options
+     * @return array<string,mixed>
+     */
+    private static function arrayOption(array $options, string $key): array
+    {
+        $value = $options[$key] ?? [];
+        if (! is_array($value)) {
+            throw new CSVConfigurationException("CSV option [{$key}] must be an array.");
+        }
+        $named = [];
+        foreach ($value as $name => $item) {
+            if (! is_string($name)) {
+                throw new CSVConfigurationException("CSV option [{$key}] requires named fields.");
+            }
+            $named[$name] = $item;
+        }
+
+        return $named;
+    }
+
+    /** @param array<string,mixed> $options
+     * @return list<string>
+     */
+    private static function headingsOption(array $options): array
+    {
+        $headings = $options['headings'] ?? [];
+        if (! is_array($headings) || ! array_is_list($headings)) {
+            throw new CSVConfigurationException('CSV headings must be a list.');
+        }
+        foreach ($headings as $heading) {
+            if (! is_string($heading)) {
+                throw new CSVConfigurationException('CSV headings must be strings.');
+            }
+        }
+
+        return $headings;
+    }
+
+    /** @param array<string,mixed> $options
+     * @return list<string|Closure>
+     */
+    private static function fieldsOption(array $options): array
+    {
+        $fields = $options['fields'] ?? [];
+        if (! is_array($fields) || ! array_is_list($fields)) {
+            throw new CSVConfigurationException('CSV fields must be a list.');
+        }
+        foreach ($fields as $field) {
+            if (! is_string($field) && ! $field instanceof Closure) {
+                throw new CSVConfigurationException('CSV fields must be names or synchronous callbacks.');
+            }
+        }
+
+        return $fields;
     }
 
     /**
@@ -201,9 +332,7 @@ final class CSVExport implements CSVExportContract
             throw CSVConfigurationException::invalidDisk($disk);
         }
 
-        $this->options = CSVExportOptionsData::from(
-            array_merge($this->optionPayload(), ['disk' => $disk])
-        );
+        $this->options = array_merge($this->optionPayload(), ['disk' => $disk]);
 
         return $this;
     }
@@ -221,9 +350,7 @@ final class CSVExport implements CSVExportContract
      */
     public function path(string $path): self
     {
-        $this->options = CSVExportOptionsData::from(
-            array_merge($this->optionPayload(), ['path' => trim($path, '/')])
-        );
+        $this->options = array_merge($this->optionPayload(), ['path' => trim($path, '/')]);
 
         return $this;
     }
@@ -241,9 +368,7 @@ final class CSVExport implements CSVExportContract
      */
     public function filename(string $filename): self
     {
-        $this->options = CSVExportOptionsData::from(
-            array_merge($this->optionPayload(), ['filename' => $filename])
-        );
+        $this->options = array_merge($this->optionPayload(), ['filename' => $filename]);
 
         return $this;
     }
@@ -261,9 +386,7 @@ final class CSVExport implements CSVExportContract
      */
     public function headings(array $headings): self
     {
-        $this->options = CSVExportOptionsData::from(
-            array_merge($this->optionPayload(), ['headings' => array_values($headings)])
-        );
+        $this->options = array_merge($this->optionPayload(), ['headings' => array_values($headings)]);
         $this->columnCount = count($headings);
 
         return $this;
@@ -284,9 +407,7 @@ final class CSVExport implements CSVExportContract
     {
         $this->fields = array_values($fields);
         $serializableFields = array_values(array_filter($fields, is_string(...)));
-        $this->options = CSVExportOptionsData::from(
-            array_merge($this->optionPayload(), ['fields' => $serializableFields])
-        );
+        $this->options = array_merge($this->optionPayload(), ['fields' => $serializableFields]);
 
         return $this;
     }
@@ -314,13 +435,13 @@ final class CSVExport implements CSVExportContract
      * Each row should be an associative array with consistent keys.
      * Supports both chunked and standard processing modes.
      *
-     * @param  array<array<string, mixed>>  $data  Array of data rows to export
-     * @return CSVExportResult Export result with file information and statistics
+     * @param  list<array<string, mixed>>  $data  Array of data rows to export
+     * @return array<string, mixed> Export result with file information and statistics
      *
      * @throws RuntimeException If file operations fail or system resources are unavailable
      * @throws CSVConfigurationException If export configuration is invalid or incomplete
      */
-    public function fromArray(array $data): CSVExportResult
+    public function fromArray(array $data): array
     {
         $this->validateConfiguration();
         $this->openFile();
@@ -355,13 +476,13 @@ final class CSVExport implements CSVExportContract
      * @template TModel of Model
      *
      * @param  Builder<TModel>  $query  Eloquent query builder instance
-     * @return CSVExportResult Export result with file information and statistics
+     * @return array<string, mixed> Export result with file information and statistics
      *
      * @throws RuntimeException If file operations fail or database query fails
      * @throws CSVConfigurationException If export configuration is invalid or incomplete
      * @throws CSVMemoryException If memory limits are exceeded during processing
      */
-    public function fromQuery(Builder $query): CSVExportResult
+    public function fromQuery(Builder $query): array
     {
         $this->validateConfiguration();
         $this->openFile();
@@ -393,12 +514,12 @@ final class CSVExport implements CSVExportContract
      * Supports collections of models, arrays, or other serializable data.
      *
      * @param  Collection<array-key, mixed>  $collection  Data to export
-     * @return CSVExportResult Export result with file information and statistics
+     * @return array<string, mixed> Export result with file information and statistics
      *
      * @throws RuntimeException If file operations fail or collection conversion fails
      * @throws CSVConfigurationException If export configuration is invalid or incomplete
      */
-    public function fromCollection(Collection $collection): CSVExportResult
+    public function fromCollection(Collection $collection): array
     {
         $this->validateConfiguration();
         $this->openFile();
@@ -422,12 +543,13 @@ final class CSVExport implements CSVExportContract
      * be loaded into memory at once.
      *
      * @param  Closure  $dataProvider  Callback that provides data chunks (callable $writer) => void
-     * @return CSVExportResult Export result with file information and statistics
+     * @return array Export result with file information and statistics
      *
      * @throws RuntimeException If file operations fail or data provider callback fails
      * @throws CSVConfigurationException If export configuration is invalid or incomplete
      */
-    public function stream(Closure $dataProvider): CSVExportResult
+    /** @return array<string,mixed> */
+    public function stream(Closure $dataProvider): array
     {
         $this->validateConfiguration();
         $this->openFile();
@@ -466,11 +588,8 @@ final class CSVExport implements CSVExportContract
      */
     private function validateConfiguration(): void
     {
-        if (! isset($this->options)) {
-            $this->options = CSVExportOptionsData::from(CSVExportOptionsData::defaults());
-        }
 
-        if (empty($this->options->filename)) {
+        if (empty($this->options['filename'])) {
             throw CSVConfigurationException::missingConfiguration('filename');
         }
 
@@ -536,15 +655,7 @@ final class CSVExport implements CSVExportContract
             return;
         }
 
-        if ($this->options === null) {
-            $headings = [];
-        } else {
-            if ($this->options->headings instanceof Optional) {
-                $headings = [];
-            } else {
-                $headings = $this->options->headings;
-            }
-        }
+        $headings = self::headingsOption($this->options);
 
         if ($headings === []) {
             $headings = $fallbackHeadings;
@@ -560,7 +671,7 @@ final class CSVExport implements CSVExportContract
 
         if ($this->handle !== null) {
             $this->columnCount = count($headings);
-            $headerValues = array_values($headings);
+            $headerValues = $headings;
             fputcsv(
                 $this->handle,
                 $headerValues,
@@ -659,8 +770,8 @@ final class CSVExport implements CSVExportContract
     private function writeRow(array $row): void
     {
         $fields = $this->fields;
-        if ($fields === [] && $this->options !== null && ! ($this->options->fields instanceof Optional)) {
-            $fields = $this->options->fields;
+        if ($fields === [] && isset($this->options['fields'])) {
+            $fields = self::fieldsOption($this->options);
         }
 
         if (empty($fields)) {
@@ -764,7 +875,18 @@ final class CSVExport implements CSVExportContract
             throw new InvalidArgumentException('CSV values must be scalar, null, arrays, or objects.');
         }
 
-        return (string) $value;
+        $text = (string) $value;
+        if (preg_match('/^[\x00-\x20]*[=+@-]/', $text) === 1) {
+            $policy = $this->options['formula_policy'] ?? 'escape';
+            if ($policy === 'reject') {
+                throw new CSVConfigurationException('CSV formula-like values are rejected.');
+            }
+            if ($policy === 'escape') {
+                return "'".$text;
+            }
+        }
+
+        return $text;
     }
 
     /**
@@ -829,7 +951,8 @@ final class CSVExport implements CSVExportContract
     private function saveFile(): array
     {
         $diskName = $this->resolveDiskName();
-        $fullPath = $this->options?->getFullPath() ?? 'export.csv';
+        $directory = trim(self::stringOption($this->options, 'path', 'exports'), '/');
+        $fullPath = ($directory === '' ? '' : $directory.'/').self::stringOption($this->options, 'filename', 'export.csv');
         $diskInstance = Storage::disk($diskName);
         $output = $this->buildOutputStream();
 
@@ -869,16 +992,16 @@ final class CSVExport implements CSVExportContract
      * information about the export operation.
      *
      * @param  array{path: string, storage_path: string, url: string|null, file_size: int}  $fileData
-     * @return CSVExportResult Complete export result with statistics and file information
+     * @return array<string, mixed> Complete export result with statistics and file information
      */
-    private function createResult(array $fileData): CSVExportResult
+    private function createResult(array $fileData): array
     {
         $processingTime = microtime(true) - $this->startTime;
         $diskName = $this->resolveDiskName();
-        $metadata = $this->options?->metadata;
+        $metadata = $this->options['metadata'] ?? null;
         $optionMetadata = is_array($metadata) ? $metadata : [];
 
-        return CSVExportResult::fromExport($fileData, [
+        return array_merge($fileData, [
             'row_count' => $this->rowCount,
             'column_count' => $this->columnCount,
             'file_size' => $fileData['file_size'],
@@ -894,11 +1017,7 @@ final class CSVExport implements CSVExportContract
 
     private function resolveDiskName(): string
     {
-        $disk = $this->options?->disk;
-
-        if ($disk instanceof Optional) {
-            return 'local';
-        }
+        $disk = $this->options['disk'] ?? null;
 
         return is_string($disk) && $disk !== '' ? $disk : 'local';
     }
@@ -910,7 +1029,7 @@ final class CSVExport implements CSVExportContract
      */
     private function optionPayload(): array
     {
-        return array_merge(CSVExportOptionsData::defaults(), $this->options?->toArray() ?? []);
+        return $this->options;
     }
 
     /**

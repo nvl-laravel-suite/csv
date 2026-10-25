@@ -5,11 +5,9 @@ declare(strict_types=1);
 use Illuminate\Contracts\Console\Kernel;
 use Nvl\Csv\Providers\CsvServiceProvider;
 use Nvl\Csv\Tests\Fixtures\Ownership\WorkerProvider;
-use Nvl\Data\Providers\DataServiceProvider;
 use Nvl\Ownership\Providers\OwnershipServiceProvider;
 use Nvl\Support\Providers\SupportServiceProvider;
 use Orchestra\Testbench\Foundation\Application as TestbenchApplication;
-use Spatie\LaravelData\LaravelDataServiceProvider;
 
 require dirname(__DIR__, 6).'/vendor/autoload.php';
 
@@ -23,7 +21,7 @@ if (! is_array($options) || ! in_array($options['driver'] ?? 'database', ['datab
     throw new RuntimeException('Unsupported native persistence worker transport.');
 }
 WorkerProvider::useSource($connection, $options);
-$application = TestbenchApplication::create(options: ['load_environment_variables' => false, 'extra' => ['dont-discover' => ['*'], 'providers' => [SupportServiceProvider::class, OwnershipServiceProvider::class, LaravelDataServiceProvider::class, DataServiceProvider::class, CsvServiceProvider::class, WorkerProvider::class]]]);
+$application = TestbenchApplication::create(options: ['load_environment_variables' => false, 'extra' => ['dont-discover' => ['*'], 'providers' => [SupportServiceProvider::class, OwnershipServiceProvider::class, CsvServiceProvider::class, WorkerProvider::class]]]);
 $kernel = $application->make(Kernel::class);
 $status = $kernel->call('queue:work', ['connection' => $options['driver'] ?? 'database', '--stop-when-empty' => false, '--max-time' => 5, '--sleep' => 1, '--tries' => 2, '--timeout' => 10, '--force' => true, '--no-interaction' => true]);
 if ($status !== 0) {

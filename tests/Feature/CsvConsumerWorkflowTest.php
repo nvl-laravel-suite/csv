@@ -3,33 +3,32 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Storage;
-use Nvl\Csv\Data\CSVImportOptionsData;
 use Nvl\Csv\Enums\CSVDelimiterEnum;
 use Nvl\Csv\Enums\CSVTypeEnum;
-use Nvl\Csv\Services\CSVAnalyzerService;
-use Nvl\Csv\Services\CSVExport;
-use Nvl\Csv\Services\CSVImport;
+use Nvl\Csv\Services\CsvAnalyzer;
+use Nvl\Csv\Services\CsvExporter;
+use Nvl\Csv\Services\CsvImporter;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
 
 it('supports a consumer analyze import export workflow through public APIs', function (): void {
     Storage::fake('consumer-exports');
     $sourcePath = $this->temporaryCsv("external_id;name\n42;Jane Doe\n43;John Doe\n");
 
-    $sourceAnalysis = (new CSVAnalyzerService)->analyzeFile($sourcePath);
+    $sourceAnalysis = (new CsvAnalyzer)->analyze($sourcePath);
     $importedRows = [];
-    $importOptions = CSVImportOptionsData::from([
+    $importOptions = csvOptions([
         'filePath' => $sourcePath,
-        'delimiter' => $sourceAnalysis->detectedDelimiter,
-        'encoding' => $sourceAnalysis->detectedEncoding,
-        'hasHeaders' => $sourceAnalysis->headers !== [],
-        'chunkSize' => $sourceAnalysis->requiresChunking
-            ? $sourceAnalysis->recommendedChunkSize
+        'delimiter' => $sourceAnalysis['detected_delimiter'],
+        'encoding' => $sourceAnalysis['detected_encoding'],
+        'hasHeaders' => $sourceAnalysis['headers'] !== [],
+        'chunkSize' => $sourceAnalysis['requires_chunking']
+            ? $sourceAnalysis['recommended_chunk_size']
             : null,
-        'skipEmptyRows' => $sourceAnalysis->emptyRowCount > 0,
+        'skipEmptyRows' => $sourceAnalysis['empty_row_count'] > 0,
         'strictMode' => false,
     ]);
 
-    $import = CSVImport::make()
+    $import = CsvImporter::make()
         ->withOptions($importOptions)
         ->mapField(
             'external_id',
@@ -43,9 +42,9 @@ it('supports a consumer analyze import export workflow through public APIs', fun
             return $row;
         })
         ->withTransaction(false)
-        ->import();
+        ->run();
 
-    $export = CSVExport::make()
+    $export = CsvExporter::make()
         ->disk('consumer-exports')
         ->path('reports')
         ->filename('people.csv')
@@ -53,21 +52,21 @@ it('supports a consumer analyze import export workflow through public APIs', fun
         ->fields(['id', 'display_name'])
         ->fromArray($importedRows);
 
-    $exportAnalysis = (new CSVAnalyzerService)->analyzeFromDisk(
+    $exportAnalysis = (new CsvAnalyzer)->analyzeDisk(
         'consumer-exports',
         'reports/people.csv',
     );
 
-    expect($sourceAnalysis->detectedDelimiter)->toBe(CSVDelimiterEnum::SEMICOLON)
-        ->and($import->isSuccessful())->toBeTrue()
+    expect($sourceAnalysis['detected_delimiter'])->toBe(CSVDelimiterEnum::SEMICOLON)
+        ->and($import['failed_rows'] === 0)->toBeTrue()
         ->and($importedRows)->toBe([
             ['id' => 42, 'display_name' => 'Jane Doe'],
             ['id' => 43, 'display_name' => 'John Doe'],
         ])
-        ->and($export->isSuccessful())->toBeTrue()
-        ->and($export->rowCount)->toBe(2)
-        ->and($exportAnalysis->headers)->toBe(['ID', 'Display Name'])
-        ->and($exportAnalysis->rowCount)->toBe(2)
+        ->and($export['row_count'] > 0)->toBeTrue()
+        ->and($export['row_count'])->toBe(2)
+        ->and($exportAnalysis['headers'])->toBe(['ID', 'Display Name'])
+        ->and($exportAnalysis['row_count'])->toBe(2)
         ->and(Storage::disk('consumer-exports')->get('reports/people.csv'))
         ->toContain("42,\"Jane Doe\"\n");
 });

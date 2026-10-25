@@ -6,7 +6,6 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Nvl\Csv\Data\CSVImportOptionsData;
 use Nvl\Csv\Enums\CSVDuplicateStrategyEnum;
 use Nvl\Csv\Enums\CSVEncodingEnum;
 use Nvl\Csv\Enums\CSVErrorLevelEnum;
@@ -15,14 +14,14 @@ use Nvl\Csv\Exceptions\CSVConfigurationException;
 use Nvl\Csv\Exceptions\CSVFileNotFoundException;
 use Nvl\Csv\Exceptions\CSVParseException;
 use Nvl\Csv\Exceptions\CSVValidationException;
-use Nvl\Csv\Services\CSVImport;
+use Nvl\Csv\Services\CsvImporter;
 use Nvl\Csv\ValueObjects\CSVConfiguration;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
 
 it('preserves trailing backslashes in standard quoted CSV fields', function (): void {
     $path = $this->temporaryCsv("path,label\n\"folder,\\\",first\nplain,second\n");
-    $import = CSVImport::make()
-        ->withOptions(CSVImportOptionsData::from(array_merge(CSVImportOptionsData::defaults(), ['filePath' => $path])))
+    $import = CsvImporter::make()
+        ->withOptions(csvOptions(array_merge([], ['filePath' => $path])))
         ->fromFile($path);
 
     expect(array_values(iterator_to_array($import->stream())))->toBe([
@@ -31,9 +30,19 @@ it('preserves trailing backslashes in standard quoted CSV fields', function (): 
     ]);
 });
 
+it('rejects malformed UTF-8 in headers and data rows', function (): void {
+    $header = $this->temporaryCsv("na\xFFme\nAda\n");
+    $row = $this->temporaryCsv("name\nAd\xFFa\n");
+
+    expect(fn (): array => iterator_to_array(CsvImporter::make()->fromFile($header)->stream()))
+        ->toThrow(CSVParseException::class, 'Invalid character encoding')
+        ->and(fn (): array => iterator_to_array(CsvImporter::make()->fromFile($row)->stream()))
+        ->toThrow(CSVParseException::class, 'Invalid character encoding');
+});
+
 it('honors explicit legacy escape configuration for imports', function (): void {
     $path = $this->temporaryCsv('value,label'."\n".'"before\\"after",kept'."\n");
-    $rows = CSVImport::make()
+    $rows = CsvImporter::make()
         ->configure(new CSVConfiguration(escape: '\\'))
         ->fromFile($path)
         ->stream();
@@ -49,7 +58,7 @@ it('imports mapped and transformed rows through the fluent compatibility API', f
     );
     $processed = [];
 
-    $result = CSVImport::make()
+    $result = CsvImporter::make()
         ->fromFile($path)
         ->mapField(
             'name',
@@ -63,25 +72,25 @@ it('imports mapped and transformed rows through the fluent compatibility API', f
 
             return [...$row, 'row_number' => $rowNumber];
         })
-        ->import();
+        ->run();
 
-    expect($result->isSuccessful())->toBeTrue()
-        ->and($result->successfulRows)->toBe(2)
-        ->and($result->failedRows)->toBe(0)
+    expect($result['failed_rows'] === 0)->toBeTrue()
+        ->and($result['successful_rows'])->toBe(2)
+        ->and($result['failed_rows'])->toBe(0)
         ->and($processed[1]['full_name'])->toBe('DOE, JANE')
         ->and($processed[1]['age'])->toBe(42)
-        ->and($result->metadata['file_path'])->toBe($path);
+        ->and($result['metadata']['file_path'])->toBe($path);
 });
 
 it('supports streaming, row limits, skipped rows, and reusable importer state', function (): void {
     $path = $this->temporaryCsv("id,name\n1,First\n,\n2,Second\n3,Third\n");
-    $options = CSVImportOptionsData::from([
+    $options = csvOptions([
         'filePath' => $path,
         'skipRows' => 1,
         'limitRows' => 2,
         'skipEmptyRows' => true,
     ]);
-    $import = CSVImport::make()->withOptions($options)->fromFile($path);
+    $import = CsvImporter::make()->withOptions($options)->fromFile($path);
 
     $firstPass = iterator_to_array($import->stream());
     $secondPass = iterator_to_array($import->stream());
@@ -96,7 +105,7 @@ it('supports streaming, row limits, skipped rows, and reusable importer state', 
 it('supports headerless CSV files and normalizes uneven rows', function (): void {
     $path = $this->temporaryCsv("A,B\nC\nD,E,F\n");
     $rows = iterator_to_array(
-        CSVImport::make()
+        CsvImporter::make()
             ->configure(new CSVConfiguration(includeHeaders: false))
             ->fromFile($path)
             ->stream(),
@@ -126,7 +135,7 @@ it('preserves the first headerless row on non-seekable disk streams', function (
     });
     Storage::shouldReceive('disk')->with('csv-non-seekable')->andReturn($disk);
 
-    $import = CSVImport::make()
+    $import = CsvImporter::make()
         ->configure(new CSVConfiguration(includeHeaders: false))
         ->fromDisk('csv-non-seekable', 'people.csv');
     $expected = [
@@ -141,28 +150,28 @@ it('preserves the first headerless row on non-seekable disk streams', function (
 it('rejects uneven rows in strict mode while preserving lenient normalization', function (): void {
     $path = $this->temporaryCsv("id,name\n1,A\n2\n");
 
-    $strictResult = CSVImport::make()
+    $strictResult = CsvImporter::make()
         ->configure(new CSVConfiguration(strictMode: true))
         ->fromFile($path)
         ->withTransaction(false)
-        ->import();
+        ->run();
 
-    expect($strictResult->successfulRows)->toBe(1)
-        ->and($strictResult->failedRows)->toBe(1)
-        ->and($strictResult->errors[0])->toContain('Column count mismatch');
+    expect($strictResult['successful_rows'])->toBe(1)
+        ->and($strictResult['failed_rows'])->toBe(1)
+        ->and($strictResult['errors'][0])->toContain('Column count mismatch');
 });
 
 it('applies DTO column mappings, column types, and metadata', function (): void {
     $path = $this->temporaryCsv("external_id,email\n42,person@example.com\n");
     $processed = [];
-    $options = CSVImportOptionsData::from([
+    $options = csvOptions([
         'filePath' => $path,
         'columnMapping' => ['external_id' => 'id'],
         'columnTypes' => ['external_id' => CSVTypeEnum::INTEGER],
         'metadata' => ['source' => 'partner-feed'],
     ]);
 
-    $result = CSVImport::make()
+    $result = CsvImporter::make()
         ->withOptions($options)
         ->processRow(function (array $row) use (&$processed): array {
             $processed[] = $row;
@@ -170,22 +179,22 @@ it('applies DTO column mappings, column types, and metadata', function (): void 
             return $row;
         })
         ->withTransaction(false)
-        ->import();
+        ->run();
 
     expect($processed)->toBe([['id' => 42]])
-        ->and($result->metadata)->toMatchArray([
+        ->and($result['metadata'])->toMatchArray([
             'source' => 'partner-feed',
             'file_path' => $path,
         ]);
 });
 
 it('rejects non-string DTO column mapping keys', function (): void {
-    $options = CSVImportOptionsData::from([
+    $options = csvOptions([
         'filePath' => '/tmp/source.csv',
         'columnMapping' => [0 => 'id'],
     ]);
 
-    expect(fn () => CSVImport::make()->withOptions($options))
+    expect(fn () => CsvImporter::make()->withOptions($options))
         ->toThrow(CSVConfigurationException::class, 'Column mapping keys must be non-empty strings.');
 });
 
@@ -194,7 +203,7 @@ it('does not roll back a caller transaction when setup fails before its own tran
     DB::beginTransaction();
 
     try {
-        expect(fn () => CSVImport::make()->fromFile($path)->import())
+        expect(fn () => CsvImporter::make()->fromFile($path)->run())
             ->toThrow(CSVParseException::class);
         expect(DB::transactionLevel())->toBe(1);
     } finally {
@@ -217,7 +226,7 @@ it('rolls back import writes on the explicitly selected database connection', fu
     });
     $path = $this->temporaryCsv("id\n1\n2\n");
 
-    $result = CSVImport::make()
+    $result = CsvImporter::make()
         ->fromFile($path)
         ->onConnection('csv_import')
         ->processRow(function (array $row) use ($connection): void {
@@ -229,21 +238,21 @@ it('rolls back import writes on the explicitly selected database connection', fu
                 throw new Exception('reject the complete import');
             }
         })
-        ->import();
+        ->run();
 
-    expect($result->isSuccessful())->toBeFalse()
+    expect($result['failed_rows'] === 0)->toBeFalse()
         ->and($connection->table('imported_rows')->count())->toBe(0);
 });
 
 it('rejects blank transaction connection names', function (): void {
-    expect(fn (): CSVImport => CSVImport::make()->onConnection('  '))
+    expect(fn (): CsvImporter => CsvImporter::make()->onConnection('  '))
         ->toThrow(InvalidArgumentException::class, 'non-empty string or null');
 });
 
 it('honors the configured error threshold when stop on error is enabled', function (): void {
     $path = $this->temporaryCsv("id\n1\n2\n3\n");
 
-    $result = CSVImport::make()
+    $result = CsvImporter::make()
         ->fromFile($path)
         ->processRow(function (array $row): array {
             if ($row['id'] === '1') {
@@ -255,29 +264,29 @@ it('honors the configured error threshold when stop on error is enabled', functi
         ->stopOnError()
         ->withErrorThreshold(CSVErrorLevelEnum::ERROR)
         ->withTransaction(false)
-        ->import();
+        ->run();
 
-    expect($result->failedRows)->toBe(1)
-        ->and($result->successfulRows)->toBe(2);
+    expect($result['failed_rows'])->toBe(1)
+        ->and($result['successful_rows'])->toBe(2);
 });
 
 it('processes synchronous batches transactionally and validates batch sizes', function (): void {
     $path = $this->temporaryCsv("id,name\n1,A\n2,B\n3,C\n");
     $batches = [];
 
-    $result = CSVImport::make()
+    $result = CsvImporter::make()
         ->fromFile($path)
         ->batch(2, function (array $rows, int $batchNumber) use (&$batches): void {
             $batches[$batchNumber] = $rows;
         });
 
-    expect($result->isSuccessful())->toBeTrue()
-        ->and($result->successfulRows)->toBe(3)
+    expect($result['failed_rows'] === 0)->toBeTrue()
+        ->and($result['successful_rows'])->toBe(3)
         ->and($batches)->toHaveCount(2)
         ->and($batches[1])->toHaveCount(2)
         ->and($batches[2])->toHaveCount(1);
 
-    expect(fn () => CSVImport::make()->fromFile($path)->batch(0, static function (): void {}))
+    expect(fn () => CsvImporter::make()->fromFile($path)->batch(0, static function (): void {}))
         ->toThrow(InvalidArgumentException::class, 'at least 1');
 });
 
@@ -285,7 +294,7 @@ it('applies error thresholds to batch callback failures', function (): void {
     $path = $this->temporaryCsv("id\n1\n2\n3\n");
     $attemptedBatches = [];
 
-    $result = CSVImport::make()
+    $result = CsvImporter::make()
         ->fromFile($path)
         ->stopOnError()
         ->withErrorThreshold(CSVErrorLevelEnum::CRITICAL)
@@ -297,24 +306,24 @@ it('applies error thresholds to batch callback failures', function (): void {
         });
 
     expect($attemptedBatches)->toBe([1, 2, 3])
-        ->and($result->successfulRows)->toBe(2)
-        ->and($result->failedRows)->toBe(1);
+        ->and($result['successful_rows'])->toBe(2)
+        ->and($result['failed_rows'])->toBe(1);
 });
 
 it('applies skip, error, and pass-through duplicate strategies', function (): void {
     $path = $this->temporaryCsv("email,name\na@example.com,A\na@example.com,B\n");
 
-    $skipped = CSVImport::make()
+    $skipped = CsvImporter::make()
         ->fromFile($path)
         ->detectDuplicates('email')
         ->withDuplicateStrategy(CSVDuplicateStrategyEnum::SKIP)
-        ->import();
+        ->run();
 
-    $errored = CSVImport::make()
+    $errored = CsvImporter::make()
         ->fromFile($path)
         ->detectDuplicates('email')
         ->withDuplicateStrategy(CSVDuplicateStrategyEnum::ERROR)
-        ->import();
+        ->run();
 
     foreach ([
         CSVDuplicateStrategyEnum::CREATE,
@@ -324,20 +333,20 @@ it('applies skip, error, and pass-through duplicate strategies', function (): vo
         CSVDuplicateStrategyEnum::INCREMENT,
         CSVDuplicateStrategyEnum::ARCHIVE,
     ] as $strategy) {
-        $result = CSVImport::make()
+        $result = CsvImporter::make()
             ->fromFile($path)
             ->detectDuplicates('email')
             ->withDuplicateStrategy($strategy)
-            ->import();
+            ->run();
 
-        expect($result->successfulRows)->toBe(2);
+        expect($result['successful_rows'])->toBe(2);
     }
 
-    expect($skipped->successfulRows)->toBe(1)
-        ->and($skipped->skippedRows)->toBe(1)
-        ->and($errored->successfulRows)->toBe(1)
-        ->and($errored->failedRows)->toBe(1)
-        ->and($errored->errors[0])->toContain('Duplicate value');
+    expect($skipped['successful_rows'])->toBe(1)
+        ->and($skipped['skipped_rows'])->toBe(1)
+        ->and($errored['successful_rows'])->toBe(1)
+        ->and($errored['failed_rows'])->toBe(1)
+        ->and($errored['errors'][0])->toContain('Duplicate value');
 });
 
 it('uses unique field mappings and reports validation failures', function (): void {
@@ -351,19 +360,19 @@ it('uses unique field mappings and reports validation failures', function (): vo
         nullable: false,
     );
 
-    $result = CSVImport::make()
+    $result = CsvImporter::make()
         ->fromFile($path)
         ->mapFields([
             'id' => $mapping,
             'email' => CSVFieldMapping::typed('email', 'email', CSVTypeEnum::EMAIL),
         ])
         ->withDuplicateStrategy(CSVDuplicateStrategyEnum::SKIP)
-        ->import();
+        ->run();
 
-    expect($result->successfulRows)->toBe(1)
-        ->and($result->failedRows)->toBe(1)
-        ->and($result->hasErrors())->toBeTrue()
-        ->and($result->failedRowsData)->toHaveCount(1);
+    expect($result['successful_rows'])->toBe(1)
+        ->and($result['failed_rows'])->toBe(1)
+        ->and($result['errors'] !== [])->toBeTrue()
+        ->and($result['failed_rows_data'])->toHaveCount(1);
 });
 
 it('reads non-local storage streams and UTF-16 input with a BOM', function (): void {
@@ -371,13 +380,13 @@ it('reads non-local storage streams and UTF-16 input with a BOM', function (): v
     Storage::disk('csv-imports')->put('incoming/remote.csv', "id,name\n1,Remote\n");
 
     $remoteRows = iterator_to_array(
-        CSVImport::make()->fromDisk('csv-imports', 'incoming/remote.csv')->stream(),
+        CsvImporter::make()->fromDisk('csv-imports', 'incoming/remote.csv')->stream(),
     );
 
     $utf16 = "\xFF\xFE".mb_convert_encoding("name,city\nИван,София\n", 'UTF-16LE', 'UTF-8');
     $utf16Path = $this->temporaryCsv($utf16);
     $utf16Rows = iterator_to_array(
-        CSVImport::make()
+        CsvImporter::make()
             ->fromFile($utf16Path)
             ->withEncoding(CSVEncodingEnum::UTF16_LE)
             ->stream(),
@@ -397,7 +406,7 @@ it('invokes error and progress callbacks without leaking state', function (): vo
     $reportedErrors = [];
     $progress = [];
 
-    $result = CSVImport::make()
+    $result = CsvImporter::make()
         ->fromFile($path)
         ->mapField('value', 'value', CSVFieldMapping::typed('value', 'value', CSVTypeEnum::INTEGER, true))
         ->onError(function (array $row, Throwable $error, int $rowNumber) use (&$reportedErrors): void {
@@ -406,10 +415,10 @@ it('invokes error and progress callbacks without leaking state', function (): vo
         ->onProgress(function (array $snapshot) use (&$progress): void {
             $progress[] = $snapshot;
         })
-        ->import();
+        ->run();
 
-    expect($result->failedRows)->toBe(1)
-        ->and($result->successfulRows)->toBe(99)
+    expect($result['failed_rows'])->toBe(1)
+        ->and($result['successful_rows'])->toBe(99)
         ->and($reportedErrors)->toHaveCount(1)
         ->and($progress)->toHaveCount(1);
 });
@@ -420,36 +429,36 @@ it('bounds retained failure diagnostics without losing failure counts', function
         $rows[] = "invalid-{$index}\n";
     }
 
-    $result = CSVImport::make()
+    $result = CsvImporter::make()
         ->fromFile($this->temporaryCsv(implode('', $rows)))
         ->mapField('value', 'value', CSVFieldMapping::typed('value', 'value', CSVTypeEnum::INTEGER, true))
         ->withTransaction(false)
-        ->import();
+        ->run();
 
-    expect($result->failedRows)->toBe(1002)
-        ->and($result->failedRowsData)->toHaveCount(1000)
-        ->and($result->errors)->toHaveCount(1000)
-        ->and($result->warnings)->toContain(
+    expect($result['failed_rows'])->toBe(1002)
+        ->and($result['failed_rows_data'])->toHaveCount(1000)
+        ->and($result['errors'])->toHaveCount(1000)
+        ->and($result['warnings'])->toContain(
             'Additional CSV failure details were omitted after the retention limit was reached.',
         );
 });
 
 it('rejects missing files, empty inputs, and missing required headers', function (): void {
-    expect(fn () => CSVImport::make()->fromFile('/definitely/missing.csv'))
+    expect(fn () => CsvImporter::make()->fromFile('/definitely/missing.csv'))
         ->toThrow(CSVFileNotFoundException::class);
 
     $empty = $this->temporaryCsv('');
-    expect(fn () => CSVImport::make()->fromFile($empty)->import())
+    expect(fn () => CsvImporter::make()->fromFile($empty)->run())
         ->toThrow(CSVParseException::class);
 
     $duplicateHeaders = $this->temporaryCsv("id,id\n1,2\n");
-    expect(fn () => CSVImport::make()->fromFile($duplicateHeaders)->import())
+    expect(fn () => CsvImporter::make()->fromFile($duplicateHeaders)->run())
         ->toThrow(CSVParseException::class);
 
     $path = $this->temporaryCsv("name\nJane\n");
-    expect(fn () => CSVImport::make()
+    expect(fn () => CsvImporter::make()
         ->fromFile($path)
         ->mapField('email', 'email', CSVFieldMapping::typed('email', 'email', CSVTypeEnum::EMAIL, true))
-        ->import())
+        ->run())
         ->toThrow(CSVValidationException::class);
 });

@@ -51,7 +51,6 @@ final class WorkerProvider extends ServiceProvider
             'nvl-core.owners' => [Company::class, Actor::class],
             'nvl-ownership.enabled' => true,
             'nvl-ownership.migrations.enabled' => false,
-            'nvl-tenancy.enabled' => false,
             'queue.default' => self::$options['driver'] ?? 'database',
             'ownership-worker.driver' => self::$options['driver'] ?? 'database',
             'queue.connections.database.connection' => 'sqlite',

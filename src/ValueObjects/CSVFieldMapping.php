@@ -6,7 +6,6 @@ namespace Nvl\Csv\ValueObjects;
 
 use Closure;
 use InvalidArgumentException;
-use Laravel\SerializableClosure\SerializableClosure;
 use Nvl\Csv\Enums\CSVTypeEnum;
 
 /**
@@ -53,82 +52,53 @@ final readonly class CSVFieldMapping
         public array $metadata = [],                   // Extension metadata
     ) {}
 
-    /**
-     * Serialize callback-bearing mappings safely for queued chunk jobs.
-     *
-     * @return array{
-     *     sourceField: string,
-     *     targetField: string,
-     *     type: CSVTypeEnum|null,
-     *     required: bool,
-     *     defaultValue: mixed,
-     *     transformer: SerializableClosure|null,
-     *     validators: list<callable|SerializableClosure>,
-     *     unique: bool,
-     *     nullable: bool,
-     *     format: string|null,
-     *     metadata: array<string, mixed>
-     * }
-     */
+    /** @return array<string,mixed> */
     public function __serialize(): array
     {
+        if ($this->transformer !== null || $this->validators !== []) {
+            throw new InvalidArgumentException('Callback-backed CSV mappings cannot be serialized.');
+        }
+
         return [
-            'sourceField' => $this->sourceField,
-            'targetField' => $this->targetField,
-            'type' => $this->type,
-            'required' => $this->required,
-            'defaultValue' => $this->defaultValue,
-            'transformer' => $this->transformer === null
-                ? null
-                : new SerializableClosure($this->transformer),
-            'validators' => array_values(array_map(
-                fn (callable $validator): callable|SerializableClosure => $validator instanceof Closure
-                    ? new SerializableClosure($validator)
-                    : $validator,
-                $this->validators,
-            )),
-            'unique' => $this->unique,
-            'nullable' => $this->nullable,
-            'format' => $this->format,
+            'sourceField' => $this->sourceField, 'targetField' => $this->targetField,
+            'type' => $this->type, 'required' => $this->required,
+            'defaultValue' => $this->defaultValue, 'unique' => $this->unique,
+            'nullable' => $this->nullable, 'format' => $this->format,
             'metadata' => $this->metadata,
         ];
     }
 
-    /**
-     * Restore a mapping serialized for a queue payload.
-     *
-     * @param  array{
-     *     sourceField: string,
-     *     targetField: string,
-     *     type: CSVTypeEnum|null,
-     *     required: bool,
-     *     defaultValue: mixed,
-     *     transformer: SerializableClosure|null,
-     *     validators: list<callable|SerializableClosure>,
-     *     unique: bool,
-     *     nullable: bool,
-     *     format: string|null,
-     *     metadata: array<string, mixed>
-     * }  $data
-     */
+    /** @param array<string,mixed> $data */
     public function __unserialize(array $data): void
     {
+        $type = $data['type'] ?? null;
+        $format = $data['format'] ?? null;
+        if (! is_string($data['sourceField'] ?? null) || ! is_string($data['targetField'] ?? null)
+            || (! $type instanceof CSVTypeEnum && $type !== null)
+            || ! is_bool($data['required'] ?? null) || ! is_bool($data['unique'] ?? null)
+            || ! is_bool($data['nullable'] ?? null)
+            || (! is_string($format) && $format !== null)
+            || ! is_array($data['metadata'] ?? null)) {
+            throw new InvalidArgumentException('Serialized CSV field mapping is invalid.');
+        }
+        $metadata = [];
+        foreach ($data['metadata'] as $key => $value) {
+            if (! is_string($key)) {
+                throw new InvalidArgumentException('CSV field mapping metadata requires named keys.');
+            }
+            $metadata[$key] = $value;
+        }
         $this->sourceField = $data['sourceField'];
         $this->targetField = $data['targetField'];
-        $this->type = $data['type'];
+        $this->type = $type;
         $this->required = $data['required'];
         $this->defaultValue = $data['defaultValue'];
-        $this->transformer = $data['transformer']?->getClosure();
-        $this->validators = array_map(
-            fn (callable|SerializableClosure $validator): callable => $validator instanceof SerializableClosure
-                ? $validator->getClosure()
-                : $validator,
-            $data['validators'],
-        );
+        $this->transformer = null;
+        $this->validators = [];
         $this->unique = $data['unique'];
         $this->nullable = $data['nullable'];
-        $this->format = $data['format'];
-        $this->metadata = $data['metadata'];
+        $this->format = $format;
+        $this->metadata = $metadata;
     }
 
     /**

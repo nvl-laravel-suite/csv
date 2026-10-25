@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 use Illuminate\Bus\PendingBatch;
 use Illuminate\Support\Facades\Bus;
-use Nvl\Csv\Data\CSVImportOptionsData;
 use Nvl\Csv\Jobs\ProcessCSVChunkJob;
 use Nvl\Csv\Services\CSVAsyncProcessor;
+use Nvl\Csv\Services\CSVHandlerRegistry;
+use Nvl\Csv\Tests\Fixtures\OwnershipRowHandler;
 
 it('routes actual CSV batches through package Core or effective Laravel queue defaults', function (array $overrides, string $connection, string $queue): void {
     config([
@@ -16,7 +17,8 @@ it('routes actual CSV batches through package Core or effective Laravel queue de
     ]);
     Bus::fake();
     $path = $this->temporaryCsv("id,name\n1,A\n");
-    app(CSVAsyncProcessor::class)->fromFile($path)->withOptions(CSVImportOptionsData::from(['filePath' => $path]))->processAsync();
+    app(CSVHandlerRegistry::class)->register('rows', OwnershipRowHandler::class);
+    app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('rows')->processAsync();
     Bus::assertBatched(static fn (PendingBatch $batch): bool => $batch->connection() === $connection
         && $batch->queue() === $queue
         && $batch->jobs->every(static fn (ProcessCSVChunkJob $job): bool => $job->connection === $connection && $job->queue === $queue));

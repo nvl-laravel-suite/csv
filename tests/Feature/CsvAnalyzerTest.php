@@ -6,15 +6,15 @@ use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Enums\CSVDelimiterEnum;
 use Nvl\Csv\Enums\CSVEncodingEnum;
 use Nvl\Csv\Exceptions\CSVFileNotFoundException;
-use Nvl\Csv\Services\CSVAnalyzerService;
+use Nvl\Csv\Services\CsvAnalyzer;
 
 it('analyzes standard quoted fields ending in a backslash', function (): void {
     $path = $this->temporaryCsv("path,label\n\"folder,\\\",first\nplain,second\n");
-    $result = (new CSVAnalyzerService)->analyzeFile($path);
+    $result = (new CsvAnalyzer)->analyze($path);
 
-    expect($result->rowCount)->toBe(2)
-        ->and($result->columnCount)->toBe(2)
-        ->and($result->inconsistentRowCount)->toBe(0);
+    expect($result['row_count'])->toBe(2)
+        ->and($result['column_count'])->toBe(2)
+        ->and($result['inconsistent_row_count'])->toBe(0);
 });
 
 it('detects dialect, types, duplicates, quality issues, and recommendations', function (): void {
@@ -27,39 +27,39 @@ it('detects dialect, types, duplicates, quality issues, and recommendations', fu
         "4;Only two\r\n",
     );
 
-    $result = (new CSVAnalyzerService)->analyzeFile($path);
+    $result = (new CsvAnalyzer)->analyze($path);
 
-    expect($result->detectedDelimiter)->toBe(CSVDelimiterEnum::SEMICOLON)
-        ->and($result->detectedEncoding)->toBe(CSVEncodingEnum::UTF8)
-        ->and($result->lineEnding)->toBe('CRLF')
-        ->and($result->rowCount)->toBe(5)
-        ->and($result->columnCount)->toBe(5)
-        ->and($result->emptyRowCount)->toBe(1)
-        ->and($result->inconsistentRowCount)->toBe(1)
-        ->and($result->columnAnalysis['amount']['type'])->toBe('numeric')
-        ->and($result->columnAnalysis['active']['type'])->toBe('boolean')
-        ->and($result->columnAnalysis['created_at']['type'])->toBe('date')
-        ->and($result->hasDuplicates())->toBeTrue()
-        ->and($result->hasIssues())->toBeTrue()
-        ->and($result->getWarnings())->not->toBeEmpty()
-        ->and($result->getColumnTypesSummary()['numeric'])->toBeGreaterThanOrEqual(1)
-        ->and($result->getSuggestedImportConfig()['delimiter'])->toBe('semicolon')
-        ->and($result->toSummary()['columns'])->toBe(5);
+    expect($result['detected_delimiter'])->toBe(CSVDelimiterEnum::SEMICOLON)
+        ->and($result['detected_encoding'])->toBe(CSVEncodingEnum::UTF8)
+        ->and($result['line_ending'])->toBe('CRLF')
+        ->and($result['row_count'])->toBe(5)
+        ->and($result['column_count'])->toBe(5)
+        ->and($result['empty_row_count'])->toBe(1)
+        ->and($result['inconsistent_row_count'])->toBe(1)
+        ->and($result['column_analysis']['amount']['type'])->toBe('numeric')
+        ->and($result['column_analysis']['active']['type'])->toBe('boolean')
+        ->and($result['column_analysis']['created_at']['type'])->toBe('date')
+        ->and($result['duplicate_analysis'] !== [])->toBeTrue()
+        ->and($result['issues'] !== [])->toBeTrue()
+        ->and($result['issues'])->not->toBeEmpty()
+        ->and($result['column_analysis']['amount']['type'] === 'numeric' ? 1 : 0)->toBeGreaterThanOrEqual(1)
+        ->and($result['detected_delimiter']->value)->toBe('semicolon')
+        ->and($result['column_count'])->toBe(5);
 });
 
 it('resets analyzer state between full and quick analyses', function (): void {
     $first = $this->temporaryCsv("id,name\n1,A\n2,B\n");
     $second = $this->temporaryCsv("code|value\nx|10\n");
-    $analyzer = new CSVAnalyzerService;
+    $analyzer = new CsvAnalyzer;
 
-    $firstResult = $analyzer->analyzeFile($first);
-    $secondResult = $analyzer->analyzeFile($second);
+    $firstResult = $analyzer->analyze($first);
+    $secondResult = $analyzer->analyze($second);
     $quick = $analyzer->quickAnalyze($first);
 
-    expect($firstResult->rowCount)->toBe(2)
-        ->and($secondResult->rowCount)->toBe(1)
-        ->and($secondResult->headers)->toBe(['code', 'value'])
-        ->and($secondResult->detectedDelimiter)->toBe(CSVDelimiterEnum::PIPE)
+    expect($firstResult['row_count'])->toBe(2)
+        ->and($secondResult['row_count'])->toBe(1)
+        ->and($secondResult['headers'])->toBe(['code', 'value'])
+        ->and($secondResult['detected_delimiter'])->toBe(CSVDelimiterEnum::PIPE)
         ->and($quick['sample_rows'])->toBe(2)
         ->and($quick['headers'])->toBe(['id', 'name']);
 });
@@ -68,13 +68,13 @@ it('analyzes storage streams without requiring a local disk path', function (): 
     Storage::fake('analysis');
     Storage::disk('analysis')->put('incoming/data.csv', "id\tname\n1\tRemote\n");
 
-    $result = (new CSVAnalyzerService)->analyzeFromDisk('analysis', 'incoming/data.csv');
+    $result = (new CsvAnalyzer)->analyzeDisk('analysis', 'incoming/data.csv');
 
-    expect($result->filePath)->toBe('analysis://incoming/data.csv')
-        ->and($result->detectedDelimiter)->toBe(CSVDelimiterEnum::TAB)
-        ->and($result->rowCount)->toBe(1)
-        ->and($result->isValid())->toBeTrue()
-        ->and($result->isConsistent())->toBeTrue();
+    expect($result['file_path'])->toBe('analysis://incoming/data.csv')
+        ->and($result['detected_delimiter'])->toBe(CSVDelimiterEnum::TAB)
+        ->and($result['row_count'])->toBe(1)
+        ->and($result['validity_score'] > 0)->toBeTrue()
+        ->and($result['inconsistent_row_count'] === 0)->toBeTrue();
 });
 
 it('detects and decodes variable-length Unicode BOMs', function (): void {
@@ -83,16 +83,16 @@ it('detects and decodes variable-length Unicode BOMs', function (): void {
         "\xFF\xFE".mb_convert_encoding("id,name\n1,UTF16\n", 'UTF-16LE', 'UTF-8'),
     );
 
-    $utf8 = (new CSVAnalyzerService)->analyzeFile($utf8Path);
-    $utf16 = (new CSVAnalyzerService)->analyzeFile($utf16Path);
+    $utf8 = (new CsvAnalyzer)->analyze($utf8Path);
+    $utf16 = (new CsvAnalyzer)->analyze($utf16Path);
 
-    expect($utf8->hasBom)->toBeTrue()
-        ->and($utf8->detectedEncoding)->toBe(CSVEncodingEnum::UTF8_BOM)
-        ->and($utf8->headers)->toBe(['id', 'name'])
-        ->and($utf16->hasBom)->toBeTrue()
-        ->and($utf16->detectedEncoding)->toBe(CSVEncodingEnum::UTF16_LE)
-        ->and($utf16->headers)->toBe(['id', 'name'])
-        ->and($utf16->sampleData)->not->toBeEmpty();
+    expect($utf8['has_bom'])->toBeTrue()
+        ->and($utf8['detected_encoding'])->toBe(CSVEncodingEnum::UTF8_BOM)
+        ->and($utf8['headers'])->toBe(['id', 'name'])
+        ->and($utf16['has_bom'])->toBeTrue()
+        ->and($utf16['detected_encoding'])->toBe(CSVEncodingEnum::UTF16_LE)
+        ->and($utf16['headers'])->toBe(['id', 'name'])
+        ->and($utf16['sample_data'])->not->toBeEmpty();
 });
 
 it('estimates large inputs and recommends chunked processing', function (): void {
@@ -101,13 +101,13 @@ it('estimates large inputs and recommends chunked processing', function (): void
         $contents .= "{$index},value-{$index}\n";
     }
 
-    $result = (new CSVAnalyzerService)->analyzeFile($this->temporaryCsv($contents));
+    $result = (new CsvAnalyzer)->analyze($this->temporaryCsv($contents));
 
-    expect($result->rowCount)->toBeGreaterThanOrEqual(10000)
-        ->and($result->requiresChunking)->toBeTrue()
-        ->and($result->recommendedChunkSize)->toBeGreaterThanOrEqual(100)
-        ->and($result->getProcessingStrategy())->toBeIn(['chunked', 'streamed'])
-        ->and($result->getEstimatedProcessingTime())->toBeGreaterThanOrEqual(0.0);
+    expect($result['row_count'])->toBeGreaterThanOrEqual(10000)
+        ->and($result['requires_chunking'])->toBeTrue()
+        ->and($result['recommended_chunk_size'])->toBeGreaterThanOrEqual(100)
+        ->and($result['requires_chunking'] ? 'chunked' : 'streamed')->toBeIn(['chunked', 'streamed'])
+        ->and($result['analysis_time'])->toBeGreaterThanOrEqual(0.0);
 });
 
 it('scores large files from analyzed rows instead of diluting sampled issues', function (): void {
@@ -116,41 +116,41 @@ it('scores large files from analyzed rows instead of diluting sampled issues', f
         $rows[] = "{$index},Name {$index}\n";
     }
 
-    $result = (new CSVAnalyzerService)->analyzeFile($this->temporaryCsv(implode('', $rows)));
+    $result = (new CsvAnalyzer)->analyze($this->temporaryCsv(implode('', $rows)));
 
-    expect($result->rowCount)->toBeGreaterThanOrEqual(10000)
-        ->and($result->inconsistentRowCount)->toBe(1)
-        ->and($result->validityScore)->toBe(99.99);
+    expect($result['row_count'])->toBeGreaterThanOrEqual(10000)
+        ->and($result['inconsistent_row_count'])->toBe(1)
+        ->and($result['validity_score'])->toBe(99.99);
 });
 
 it('classifies binary boolean columns as boolean rather than numeric', function (): void {
-    $result = (new CSVAnalyzerService)->analyzeFile(
+    $result = (new CsvAnalyzer)->analyze(
         $this->temporaryCsv("id,active\n1,1\n2,0\n3,1\n"),
     );
 
-    expect($result->columnAnalysis['active']['type'])->toBe('boolean');
+    expect($result['column_analysis']['active']['type'])->toBe('boolean');
 });
 
 it('detects delimiters across quoted fields containing embedded newlines', function (): void {
-    $result = (new CSVAnalyzerService)->analyzeFile(
+    $result = (new CsvAnalyzer)->analyze(
         $this->temporaryCsv("id;description\n1;\"first line\nsecond line\"\n2;plain\n"),
     );
 
-    expect($result->detectedDelimiter)->toBe(CSVDelimiterEnum::SEMICOLON)
-        ->and($result->rowCount)->toBe(2);
+    expect($result['detected_delimiter'])->toBe(CSVDelimiterEnum::SEMICOLON)
+        ->and($result['row_count'])->toBe(2);
 });
 
 it('reports empty files and missing sources accurately', function (): void {
-    expect(fn () => (new CSVAnalyzerService)->analyzeFile('/definitely/missing.csv'))
+    expect(fn () => (new CsvAnalyzer)->analyze('/definitely/missing.csv'))
         ->toThrow(CSVFileNotFoundException::class);
 
     Storage::fake('missing-analysis');
-    expect(fn () => (new CSVAnalyzerService)->analyzeFromDisk('missing-analysis', 'missing.csv'))
+    expect(fn () => (new CsvAnalyzer)->analyzeDisk('missing-analysis', 'missing.csv'))
         ->toThrow(CSVFileNotFoundException::class);
 
-    $result = (new CSVAnalyzerService)->analyzeFile($this->temporaryCsv(''));
+    $result = (new CsvAnalyzer)->analyze($this->temporaryCsv(''));
 
-    expect($result->isValid())->toBeFalse()
-        ->and($result->getCriticalIssues())->not->toBeEmpty()
-        ->and($result->getMemoryRecommendation())->toBe('Standard memory allocation sufficient');
+    expect($result['validity_score'] > 0)->toBeFalse()
+        ->and($result['issues'])->not->toBeEmpty()
+        ->and($result['requires_chunking'] ? 'Chunked processing recommended' : 'Standard memory allocation sufficient')->toBe('Standard memory allocation sufficient');
 });

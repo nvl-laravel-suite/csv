@@ -2,14 +2,20 @@
 
 declare(strict_types=1);
 
+use Illuminate\Bus\PendingBatch;
 use Illuminate\Log\LogManager;
-use Nvl\Csv\Data\CSVImportOptionsData;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Jobs\ProcessCSVChunkJob;
+use Nvl\Csv\Services\CSVAsyncProcessor;
+use Nvl\Csv\Services\CSVHandlerRegistry;
+use Nvl\Csv\Services\CSVWorkStore;
+use Nvl\Csv\Tests\Fixtures\FailingRowHandler;
 use Nvl\Support\Facades\PackageLog;
 use Nvl\Support\Logging\PackageLogger;
 use Psr\Log\LoggerInterface;
 
-it('emits one aggregate for failed rows in quiet mode and keeps row content private', function (): void {
+it('logs a retryable handler failure without private row content', function (): void {
     config()->set('nvl-core.logging.packages.csv.verbosity', 'quiet');
     config()->set('logging.channels.nvl', ['driver' => 'single']);
     $records = [];
@@ -21,10 +27,21 @@ it('emits one aggregate for failed rows in quiet mode and keeps row content priv
     $manager->shouldReceive('channel')->andReturn($sink);
     $this->app->instance(PackageLogger::class, new PackageLogger(config(), $manager));
     PackageLog::clearResolvedInstance(PackageLogger::class);
-    $job = new ProcessCSVChunkJob([
-        ['row_number' => 1, 'data' => ['email' => 'first@private.test']],
-        ['row_number' => 2, 'data' => ['email' => 'second@private.test']],
-    ], 7, [], CSVImportOptionsData::from(['filePath' => 'private.csv']), static fn () => throw new RuntimeException('private secret row'));
-    $job->handle();
-    expect($records)->toBe([['warning', 'nvl.csv.chunk.rows_failed', ['chunk_index' => 7, 'processed_rows' => 0, 'failed_rows' => 2, 'package' => 'csv', 'message_key' => 'nvl.csv.chunk.rows_failed']]]);
+    Storage::fake('local');
+    Bus::fake();
+    app(CSVHandlerRegistry::class)->register('failing', FailingRowHandler::class);
+    $path = $this->temporaryCsv("email\nfirst@private.test\n");
+    app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('failing')->processAsync();
+    $job = null;
+    Bus::assertBatched(function (PendingBatch $pending) use (&$job): bool {
+        $job = $pending->jobs->first();
+
+        return true;
+    });
+    expect($job)->toBeInstanceOf(ProcessCSVChunkJob::class);
+    expect(fn () => $job->handle(app(CSVWorkStore::class), app(CSVHandlerRegistry::class)))->toThrow(RuntimeException::class);
+    expect($records)->toHaveCount(1)
+        ->and($records[0][1])->toBe('nvl.csv.chunk.failed')
+        ->and(json_encode($records, JSON_THROW_ON_ERROR))->not->toContain('first@private.test')
+        ->and(Storage::disk('local')->allFiles('ownership'))->not->toBe([]);
 });
