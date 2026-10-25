@@ -21,6 +21,7 @@ use Nvl\Support\Facades\PackageLog;
 use Nvl\Support\Ownership\Contracts\OwnershipQueuedJob;
 use Nvl\Support\Ownership\Exceptions\OwnershipViolation;
 use Nvl\Support\Ownership\ValueObjects\OwnershipJobEnvelope;
+use RuntimeException;
 use Throwable;
 
 /** A scalar reference to staged, sealed CSV work. The registered handler owns row side effects. */
@@ -129,7 +130,9 @@ final class ProcessCSVChunkJob implements OwnershipQueuedJob, ShouldQueue
                 throw $error;
             }
         }
-        Storage::disk($this->work->disk)->put($done, $chunk['sha256'], ['visibility' => 'private']);
+        if (! Storage::disk($this->work->disk)->put($done, $chunk['sha256'], ['visibility' => 'private'])) {
+            throw new RuntimeException('CSV chunk completion could not be recorded.');
+        }
         Storage::disk($this->work->disk)->delete($path);
     }
 

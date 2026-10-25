@@ -671,7 +671,7 @@ final class CsvExporter
 
         if ($this->handle !== null) {
             $this->columnCount = count($headings);
-            $headerValues = $headings;
+            $headerValues = array_map(fn (string $heading): string => $this->applyFormulaPolicy($heading), $headings);
             fputcsv(
                 $this->handle,
                 $headerValues,
@@ -847,35 +847,22 @@ final class CsvExporter
      */
     private function sanitizeValue(mixed $value): string
     {
-        if ($value === null) {
-            return '';
-        }
+        $text = match (true) {
+            $value === null => '',
+            is_bool($value) => $value ? '1' : '0',
+            $value instanceof BackedEnum => (string) $value->value,
+            $value instanceof DateTimeInterface => $value->format(DATE_ATOM),
+            $value instanceof Stringable => (string) $value,
+            is_array($value) || is_object($value) => json_encode($value, JSON_THROW_ON_ERROR),
+            is_scalar($value) => (string) $value,
+            default => throw new InvalidArgumentException('CSV values must be scalar, null, arrays, or objects.'),
+        };
 
-        if (is_bool($value)) {
-            return $value ? '1' : '0';
-        }
+        return $this->applyFormulaPolicy($text);
+    }
 
-        if ($value instanceof BackedEnum) {
-            return (string) $value->value;
-        }
-
-        if ($value instanceof DateTimeInterface) {
-            return $value->format(DATE_ATOM);
-        }
-
-        if ($value instanceof Stringable) {
-            return (string) $value;
-        }
-
-        if (is_array($value) || is_object($value)) {
-            return json_encode($value, JSON_THROW_ON_ERROR);
-        }
-
-        if (! is_scalar($value)) {
-            throw new InvalidArgumentException('CSV values must be scalar, null, arrays, or objects.');
-        }
-
-        $text = (string) $value;
+    private function applyFormulaPolicy(string $text): string
+    {
         if (preg_match('/^[\x00-\x20]*[=+@-]/', $text) === 1) {
             $policy = $this->options['formula_policy'] ?? 'escape';
             if ($policy === 'reject') {

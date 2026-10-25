@@ -235,9 +235,13 @@ it('validates native option arrays and preserves configuration invariants', func
     expect($configuration->delimiter)->toBe(';')
         ->and($configuration->includeIndex)->toBeTrue()
         ->and($configuration->isStreaming())->toBeTrue()
+        ->and($configuration->isChunked())->toBeTrue()
         ->and($configuration->getEffectiveChunkSize())->toBe(250)
+        ->and($configuration->toArray()['processing_mode'])->toBe('stream')
         ->and(CSVConfiguration::fromDelimiter(CSVDelimiterEnum::TAB)->delimiter)->toBe("\t")
-        ->and(CSVConfiguration::excel()->includeBOM)->toBeTrue();
+        ->and(CSVConfiguration::default()->isChunked())->toBeFalse()
+        ->and(CSVConfiguration::excel()->includeBOM)->toBeTrue()
+        ->and(CSVConfiguration::largeFile()->isStreaming())->toBeTrue();
     expect(fn () => (new CsvImporter)->withOptions(['unknown' => true]))->toThrow(CSVConfigurationException::class);
     expect(fn () => (new CsvExporter)->withOptions(['unknown' => true]))->toThrow(CSVConfigurationException::class);
 });

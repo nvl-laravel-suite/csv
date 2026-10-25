@@ -11,6 +11,11 @@ use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use Nvl\Csv\Enums\CSVDelimiterEnum;
+use Nvl\Csv\Enums\CSVDuplicateStrategyEnum;
+use Nvl\Csv\Enums\CSVEncodingEnum;
+use Nvl\Csv\Enums\CSVProcessingModeEnum;
+use Nvl\Csv\Enums\CSVTypeEnum;
 use Nvl\Csv\Jobs\ProcessCSVChunkJob;
 use Nvl\Csv\Ownership\CSVBatchCallbacks;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
@@ -65,7 +70,9 @@ final class CSVAsyncProcessor
     /** @param array<string,mixed> $options */
     public function withOptions(array $options): self
     {
+        $options = $this->normalizeOptions($options);
         $this->assertJsonOptions($options);
+        (new CsvImporter)->withOptions($options);
         $this->options = $options;
 
         return $this;
@@ -184,7 +191,7 @@ final class CSVAsyncProcessor
         $options = $this->options;
         $mappings = array_map(static fn (CSVFieldMapping $mapping): array => $mapping->toArray(), $this->fieldMappings);
         json_encode(['options' => $options, 'mappings' => $mappings], JSON_THROW_ON_ERROR);
-        $importer = (new CsvImporter)->withOptions($options)->fromFile($this->filePath ?? throw new OwnershipViolation);
+        $importer = (new CsvImporter)->withOptions($options)->fromFile($this->filePath ?? throw new OwnershipViolation)->stopOnError();
         $chunks = [];
         $buffer = [];
         $index = 0;
@@ -232,5 +239,29 @@ final class CSVAsyncProcessor
                 $this->assertJsonOptions($item, $depth + 1);
             }
         }
+    }
+
+    /** @param array<string,mixed> $options
+     * @return array<string,mixed>
+     */
+    private function normalizeOptions(array $options): array
+    {
+        if (($options['delimiter'] ?? null) instanceof CSVDelimiterEnum) {
+            $options['delimiter'] = $options['delimiter']->getCharacter();
+        }
+        foreach (['encoding' => CSVEncodingEnum::class, 'duplicate_strategy' => CSVDuplicateStrategyEnum::class, 'processing_mode' => CSVProcessingModeEnum::class] as $key => $enumClass) {
+            if (($options[$key] ?? null) instanceof $enumClass) {
+                $options[$key] = $options[$key]->value;
+            }
+        }
+        if (is_array($options['column_types'] ?? null)) {
+            foreach ($options['column_types'] as $field => $type) {
+                if ($type instanceof CSVTypeEnum) {
+                    $options['column_types'][$field] = $type->value;
+                }
+            }
+        }
+
+        return $options;
     }
 }

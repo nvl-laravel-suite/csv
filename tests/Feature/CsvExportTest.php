@@ -19,6 +19,11 @@ beforeEach(function (): void {
     Storage::fake('csv-exports');
 });
 
+enum CSVFormulaPayload: string
+{
+    case Injected = '=SUM(1,2)';
+}
+
 it('round trips quotes and backslashes through standard CSV readers', function (?CSVExportFormatEnum $format): void {
     $options = [
         'disk' => 'csv-exports',
@@ -294,6 +299,39 @@ it('escapes spreadsheet formulas by default and honors explicit reject or allow 
         'headings' => ['value'], 'formula_policy' => 'allow',
     ]);
     expect($allowed)->toContain('=SUM(1,2)')->not->toContain("'=SUM(1,2)");
+});
+
+it('applies formula policy after converting stringable and backed enum cells', function (): void {
+    $stringable = new class implements Stringable
+    {
+        public function __toString(): string
+        {
+            return '=SUM(1,2)';
+        }
+    };
+    $rows = [['text' => $stringable, 'enum' => CSVFormulaPayload::Injected]];
+
+    $escaped = CsvExporter::make()->export($rows, ['headings' => ['text', 'enum']]);
+    expect(str_getcsv(explode("\n", $escaped)[1]))->toBe(["'=SUM(1,2)", "'=SUM(1,2)"]);
+
+    expect(fn (): string => CsvExporter::make()->export($rows, [
+        'headings' => ['text', 'enum'], 'formula_policy' => 'reject',
+    ]))->toThrow(CSVConfigurationException::class);
+});
+
+it('applies formula policy to explicit and inferred headings', function (): void {
+    $explicit = CsvExporter::make()->export([['value' => 'safe']], ['headings' => ['=EXPLOIT()']]);
+    $inferred = CsvExporter::make()->export([['=EXPLOIT()' => 'safe']], []);
+
+    expect(str_getcsv(explode("\n", $explicit)[0]))->toBe(["'=EXPLOIT()"])
+        ->and(str_getcsv(explode("\n", $inferred)[0]))->toBe(["'=EXPLOIT()"]);
+
+    expect(fn (): string => CsvExporter::make()->export([['value' => 'safe']], [
+        'headings' => ['=EXPLOIT()'], 'formula_policy' => 'reject',
+    ]))->toThrow(CSVConfigurationException::class);
+    expect(fn (): string => CsvExporter::make()->export([['=EXPLOIT()' => 'safe']], [
+        'formula_policy' => 'reject',
+    ]))->toThrow(CSVConfigurationException::class);
 });
 
 it('checks the byte budget before materializing a native string export', function (): void {

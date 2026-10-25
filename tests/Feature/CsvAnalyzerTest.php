@@ -39,10 +39,9 @@ it('detects dialect, types, duplicates, quality issues, and recommendations', fu
         ->and($result['column_analysis']['amount']['type'])->toBe('numeric')
         ->and($result['column_analysis']['active']['type'])->toBe('boolean')
         ->and($result['column_analysis']['created_at']['type'])->toBe('date')
-        ->and($result['duplicate_analysis'] !== [])->toBeTrue()
+        ->and($result['duplicate_analysis']['id'])->toBeGreaterThan(0)
         ->and($result['issues'] !== [])->toBeTrue()
         ->and($result['issues'])->not->toBeEmpty()
-        ->and($result['column_analysis']['amount']['type'] === 'numeric' ? 1 : 0)->toBeGreaterThanOrEqual(1)
         ->and($result['detected_delimiter']->value)->toBe('semicolon')
         ->and($result['column_count'])->toBe(5);
 });
@@ -106,7 +105,6 @@ it('estimates large inputs and recommends chunked processing', function (): void
     expect($result['row_count'])->toBeGreaterThanOrEqual(10000)
         ->and($result['requires_chunking'])->toBeTrue()
         ->and($result['recommended_chunk_size'])->toBeGreaterThanOrEqual(100)
-        ->and($result['requires_chunking'] ? 'chunked' : 'streamed')->toBeIn(['chunked', 'streamed'])
         ->and($result['analysis_time'])->toBeGreaterThanOrEqual(0.0);
 });
 
@@ -152,5 +150,5 @@ it('reports empty files and missing sources accurately', function (): void {
 
     expect($result['validity_score'] > 0)->toBeFalse()
         ->and($result['issues'])->not->toBeEmpty()
-        ->and($result['requires_chunking'] ? 'Chunked processing recommended' : 'Standard memory allocation sufficient')->toBe('Standard memory allocation sufficient');
+        ->and($result['requires_chunking'])->toBeFalse();
 });

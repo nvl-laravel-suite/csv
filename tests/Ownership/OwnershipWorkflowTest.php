@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Nvl\Csv\Enums\CSVEncodingEnum;
 use Nvl\Csv\Services\CSVAsyncProcessor;
 use Nvl\Csv\Services\CSVHandlerRegistry;
 use Nvl\Csv\Services\CSVWorkStore;
@@ -131,6 +132,50 @@ it('suppresses a fully completed chunk replay under the same admitted owner', fu
             $job->handle(app(CSVWorkStore::class), app(CSVHandlerRegistry::class));
 
             expect(DB::table('ownership_queue_probes')->where('stage', 'csv-row')->count())->toBe(1);
+        });
+    } finally {
+        unlink($path);
+    }
+});
+
+it('retains a completed chunk when its completion seal cannot be written', function (): void {
+    $path = tempnam(sys_get_temp_dir(), 'nvl_csv_');
+    file_put_contents($path, "name\nRecoverable row\n");
+    try {
+        app(OwnershipRunner::class)->run(Company::query()->findOrFail(7), Actor::query()->findOrFail(1), function () use ($path): void {
+            app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('ownership-rows')->processAsync();
+            $payload = json_decode(DB::table('jobs')->sole()->payload, true, flags: JSON_THROW_ON_ERROR);
+            $job = unserialize($payload['data']['command']);
+            $chunkPath = dirname($job->work->manifestPath).'/chunks/0.json';
+            $disk = Storage::disk('local');
+            $faultDisk = Mockery::mock($disk)->makePartial();
+            $faultDisk->shouldReceive('put')->once()->with($chunkPath.'.done', Mockery::any(), ['visibility' => 'private'])->andReturnFalse();
+            Storage::partialMock()->shouldReceive('disk')->with('local')->andReturn($faultDisk);
+
+            expect(fn () => $job->handle(app(CSVWorkStore::class), app(CSVHandlerRegistry::class)))
+                ->toThrow(RuntimeException::class);
+            expect($disk->exists($chunkPath))->toBeTrue()
+                ->and($disk->exists($chunkPath.'.done'))->toBeFalse()
+                ->and($disk->exists($job->work->manifestPath))->toBeTrue();
+        });
+    } finally {
+        unlink($path);
+    }
+});
+
+it('delivers nondefault encoded queued rows to the registered handler', function (): void {
+    $path = tempnam(sys_get_temp_dir(), 'nvl_csv_');
+    file_put_contents($path, mb_convert_encoding("name\nAndré\n", 'Windows-1252', 'UTF-8'));
+    try {
+        app(OwnershipRunner::class)->run(Company::query()->findOrFail(7), Actor::query()->findOrFail(1), function () use ($path): void {
+            app(CSVAsyncProcessor::class)->fromFile($path)->withOptions([
+                'encoding' => CSVEncodingEnum::WINDOWS_1252->value,
+            ])->usingHandler('ownership-rows')->processAsync();
+            $payload = json_decode(DB::table('jobs')->sole()->payload, true, flags: JSON_THROW_ON_ERROR);
+            $job = unserialize($payload['data']['command']);
+            $job->handle(app(CSVWorkStore::class), app(CSVHandlerRegistry::class));
+
+            expect(DB::table('ownership_queue_probes')->where('stage', 'csv-row')->sole()->label)->toBe('André');
         });
     } finally {
         unlink($path);

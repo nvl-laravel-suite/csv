@@ -5,6 +5,11 @@ declare(strict_types=1);
 use Illuminate\Bus\PendingBatch;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
+use Nvl\Csv\Enums\CSVDuplicateStrategyEnum;
+use Nvl\Csv\Enums\CSVEncodingEnum;
+use Nvl\Csv\Enums\CSVProcessingModeEnum;
+use Nvl\Csv\Exceptions\CSVConfigurationException;
+use Nvl\Csv\Exceptions\CSVValidationException;
 use Nvl\Csv\Jobs\ProcessCSVChunkJob;
 use Nvl\Csv\Services\CSVAsyncProcessor;
 use Nvl\Csv\Services\CSVHandlerRegistry;
@@ -37,6 +42,61 @@ it('rejects non JSON queued options at configuration', function (): void {
         'metadata' => ['callback' => static fn (): null => null],
     ]))->toThrow(OwnershipViolation::class)
         ->and(Storage::disk('local')->allFiles())->toBe([]);
+});
+
+it('rejects unknown queued enum values before staging', function (): void {
+    expect(fn () => app(CSVAsyncProcessor::class)->withOptions(['encoding' => 'not-an-encoding']))
+        ->toThrow(CSVConfigurationException::class)
+        ->and(fn () => app(CSVAsyncProcessor::class)->withOptions(['duplicate_strategy' => 'not-a-policy']))
+        ->toThrow(CSVConfigurationException::class)
+        ->and(Storage::disk('local')->allFiles())->toBe([]);
+});
+
+it('stages a nondefault encoded source with canonical JSON enum option values', function (): void {
+    Bus::fake();
+    $path = $this->temporaryCsv(mb_convert_encoding("name\nAndré\n", 'Windows-1252', 'UTF-8'));
+
+    app(CSVAsyncProcessor::class)->fromFile($path)->withOptions([
+        'encoding' => CSVEncodingEnum::WINDOWS_1252,
+        'processing_mode' => CSVProcessingModeEnum::STREAM,
+    ])->usingHandler('rows')->processAsync();
+
+    $manifestPath = collect(Storage::disk('local')->allFiles('ownership'))->first(static fn (string $file): bool => str_ends_with($file, '/manifest.json'));
+    $manifest = Storage::disk('local')->json($manifestPath);
+    $chunk = Storage::disk('local')->json($manifest['manifest']['chunks'][0]['path']);
+
+    expect($manifest['manifest']['options']['encoding'])->toBe('Windows-1252')
+        ->and($manifest['manifest']['options']['processing_mode'])->toBe('stream')
+        ->and($chunk[0]['data']['name'])->toBe('André');
+});
+
+it('fails queued staging for the error duplicate policy without dispatching or retaining work', function (): void {
+    Bus::fake();
+    $path = $this->temporaryCsv("name\nAda\nAda\n");
+
+    expect(fn () => app(CSVAsyncProcessor::class)->fromFile($path)->withOptions([
+        'unique_fields' => ['name'],
+        'duplicate_strategy' => CSVDuplicateStrategyEnum::ERROR,
+    ])->usingHandler('rows')->processAsync())->toThrow(CSVValidationException::class, 'Duplicate value');
+    expect(Storage::disk('local')->allFiles())->toBe([]);
+    Bus::assertNothingDispatched();
+});
+
+it('applies a scalar duplicate skip policy to queued chunk data', function (): void {
+    Bus::fake();
+    $path = $this->temporaryCsv("name\nAda\nAda\n");
+
+    app(CSVAsyncProcessor::class)->fromFile($path)->withOptions([
+        'unique_fields' => ['name'],
+        'duplicate_strategy' => 'skip',
+    ])->usingHandler('rows')->processAsync();
+
+    $manifestPath = collect(Storage::disk('local')->allFiles('ownership'))->first(static fn (string $file): bool => str_ends_with($file, '/manifest.json'));
+    $manifest = Storage::disk('local')->json($manifestPath);
+    $chunk = Storage::disk('local')->json($manifest['manifest']['chunks'][0]['path']);
+
+    expect($manifest['manifest']['options']['duplicate_strategy'])->toBe('skip')
+        ->and($chunk)->toHaveCount(1);
 });
 
 it('stages bounded chunks instead of embedding source rows in jobs', function (): void {

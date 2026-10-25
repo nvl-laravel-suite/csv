@@ -218,14 +218,25 @@ final class CsvImporter
             throw new CSVConfigurationException('CSV delimiter must be a character or delimiter enum.');
         }
         $processingMode = $options['processing_mode'] ?? $this->configuration->processingMode;
+        if (is_string($processingMode)) {
+            $processingMode = CSVProcessingModeEnum::tryFrom($processingMode);
+        }
         if (! $processingMode instanceof CSVProcessingModeEnum) {
             throw new CSVConfigurationException('CSV processing mode is invalid.');
         }
         $encoding = $options['encoding'] ?? null;
+        if (is_string($encoding)) {
+            $encoding = CSVEncodingEnum::tryFrom($encoding)
+                ?? throw new CSVConfigurationException('CSV encoding is invalid.');
+        }
         if ($encoding !== null && ! $encoding instanceof CSVEncodingEnum) {
             throw new CSVConfigurationException('CSV encoding is invalid.');
         }
         $duplicateStrategy = $options['duplicate_strategy'] ?? null;
+        if (is_string($duplicateStrategy)) {
+            $duplicateStrategy = CSVDuplicateStrategyEnum::tryFrom($duplicateStrategy)
+                ?? throw new CSVConfigurationException('CSV duplicate strategy is invalid.');
+        }
         if ($duplicateStrategy !== null && ! $duplicateStrategy instanceof CSVDuplicateStrategyEnum) {
             throw new CSVConfigurationException('CSV duplicate strategy is invalid.');
         }
