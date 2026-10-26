@@ -10,7 +10,11 @@ use Illuminate\Container\Container;
 use Nvl\Csv\Services\CSVWorkStore;
 use Nvl\Csv\ValueObjects\CSVWorkReference;
 
-/** Resolves native completion callbacks after the worker re-admits their captured boundary. @internal */
+/**
+ * Resolves native completion callbacks after the worker re-admits their captured boundary.
+ *
+ * @internal
+ */
 final readonly class CSVBatchCallbacks
 {
     /** Retain retryable failed chunks and remove only successfully completed temporary work.

@@ -6,7 +6,9 @@ namespace Nvl\Csv\Enums;
 
 use Nvl\Support\Contracts\ResponseCode;
 
-/** Stable public response discriminators for Csv.
+/**
+ * Stable public response discriminators for Csv.
+ *
  * @api
  */
 enum CSVResponseCode: string implements ResponseCode

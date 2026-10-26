@@ -8,7 +8,11 @@ use Illuminate\Contracts\Container\Container;
 use InvalidArgumentException;
 use Nvl\Csv\Contracts\CSVRowHandler;
 
-/** Retains only stable aliases and class names; handlers resolve in restored context. */
+/**
+ * Retains only stable aliases and class names; handlers resolve in restored context.
+ *
+ * @api
+ */
 final class CSVHandlerRegistry
 {
     /** @var array<string,array{class:class-string<CSVRowHandler>,version:int}> */

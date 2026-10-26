@@ -663,6 +663,40 @@
             "properties": [],
             "constants": []
         },
+        "Nvl\\Csv\\Services\\CSVAsyncProcessor": {
+            "kind": "class",
+            "file": "src/Services/CSVAsyncProcessor.php",
+            "methods": [
+                "__construct",
+                "cancelBatch",
+                "fromFile",
+                "getBatchStatus",
+                "make",
+                "mapField",
+                "onBatchComplete",
+                "onComplete",
+                "onProgress",
+                "processAsync",
+                "processRow",
+                "usingHandler",
+                "withChunkSize",
+                "withOptions"
+            ],
+            "properties": [],
+            "constants": []
+        },
+        "Nvl\\Csv\\Services\\CSVHandlerRegistry": {
+            "kind": "class",
+            "file": "src/Services/CSVHandlerRegistry.php",
+            "methods": [
+                "__construct",
+                "has",
+                "register",
+                "resolve"
+            ],
+            "properties": [],
+            "constants": []
+        },
         "Nvl\\Csv\\Services\\CsvAnalyzer": {
             "kind": "class",
             "file": "src/Services/CsvAnalyzer.php",
@@ -718,7 +752,6 @@
                 "onError",
                 "onProgress",
                 "processRow",
-                "run",
                 "stopOnError",
                 "stream",
                 "withDuplicateStrategy",

@@ -28,7 +28,11 @@ use Nvl\Support\Ownership\Services\OwnershipContextResolver;
 use Nvl\Support\Ownership\ValueObjects\OwnershipJobEnvelope;
 use Throwable;
 
-/** Stages bounded private CSV chunks for a registered, durable row handler. */
+/**
+ * Stages bounded private CSV chunks for a registered, durable row handler.
+ *
+ * @api
+ */
 final class CSVAsyncProcessor
 {
     private ?string $filePath = null;

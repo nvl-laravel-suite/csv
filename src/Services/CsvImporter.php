@@ -157,7 +157,11 @@ final class CsvImporter
         }
     }
 
-    /** Execute a configured synchronous import, including its local row callback. @internal
+    /**
+     * Execute a configured synchronous import, including its local row callback.
+     *
+     * @internal
+     *
      * @return array<string,mixed>
      */
     public function run(): array

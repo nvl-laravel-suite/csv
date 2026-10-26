@@ -13,7 +13,11 @@ use Nvl\Support\Ownership\Services\OwnershipContextResolver;
 use Nvl\Support\Ownership\ValueObjects\OwnershipJobEnvelope;
 use RuntimeException;
 
-/** Protects private JSON manifests by exact producer boundary, canonical path and content identity. @internal */
+/**
+ * Protects private JSON manifests by exact producer boundary, canonical path and content identity.
+ *
+ * @internal
+ */
 final readonly class CSVWorkStore
 {
     public function __construct(private OwnershipContextResolver $context, private OwnershipQueueContext $queue) {}
