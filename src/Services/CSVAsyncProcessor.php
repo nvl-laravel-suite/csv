@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace Nvl\Csv\Services;
 
 use Closure;
+use DomainException;
 use Illuminate\Bus\Batch;
+use Illuminate\Bus\BatchRepository;
+use Illuminate\Bus\DatabaseBatchRepository;
 use Illuminate\Container\Container;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -51,6 +55,7 @@ final class CSVAsyncProcessor
 
     public function __construct(
         private readonly CSVWorkStore $workStore,
+        private readonly BatchRepository $batches,
         private readonly CSVHandlerRegistry $handlers,
         private readonly OwnershipContextResolver $ownership,
         private readonly OwnershipQueueContext $ownershipQueue,
@@ -140,6 +145,14 @@ final class CSVAsyncProcessor
         if ($this->filePath === null || $this->handlerAlias === null || ! $this->handlers->has($this->handlerAlias, $this->handlerVersion)) {
             throw new InvalidArgumentException('CSV source and registered handler are required before enqueueing.');
         }
+        $source = $this->options['connection'] ?? null;
+        if ($source !== null && ! is_string($source)) {
+            throw new InvalidArgumentException('CSV source connection must be a configured connection name.');
+        }
+        if (DB::connection($source)->transactionLevel() !== 0
+            || ($this->batches instanceof DatabaseBatchRepository && $this->batches->getConnection()->transactionLevel() !== 0)) {
+            throw new DomainException('Queued CSV production must start outside existing source and batch database transactions.');
+        }
         $snapshot = $this->ownership->current()->snapshot();
         $envelope = $snapshot->mode === OwnershipContextMode::Unresolved
             ? $this->ownershipQueue->captureUnowned()
@@ -152,6 +165,9 @@ final class CSVAsyncProcessor
             }
             $work = CSVWorkReference::forOwnership((string) Str::uuid(), $envelope, $disk, $this->handlerAlias ?? throw new OwnershipViolation, $this->handlerVersion);
             $jobs = $this->stage($work, $envelope);
+            foreach ($jobs as $job) {
+                $job->afterCommit();
+            }
             $batch = Bus::batch($jobs)->name('CSV Processing: '.$work->workId)->allowFailures()
                 ->finally(CSVBatchCallbacks::cleanup($work))
                 ->onConnection(PackageOptions::queueConnection('csv'))
