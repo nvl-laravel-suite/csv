@@ -68,3 +68,5 @@ Queued `withOptions()` stores JSON-safe snake_case values. `encoding`, `processi
 ## Testing a host
 
 Test the service with a real small CSV fixture and a host handler. Cover delimiter and encoding, malformed rows, duplicate strategy, import rollback on the selected connection, export field order and formula policy, and queued handler registration, tamper rejection, cancellation, retry, and replay. Use Laravel storage and bus fakes where they represent the effect being asserted. Read [UPGRADING.md](UPGRADING.md) before migrating from the former DTO or Tenancy APIs. CSV declares [no domain events](docs/events.md).
+
+Shared [service contracts, model extensions and composition](https://github.com/nvl-laravel-suite/laravel-suite/blob/main/docs/consumer-api.md) apply alongside the package-specific rules above.

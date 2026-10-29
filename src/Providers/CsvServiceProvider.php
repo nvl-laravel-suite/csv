@@ -43,6 +43,6 @@ final class CsvServiceProvider extends ServiceProvider implements OwnershipInteg
     {
         $this->app->make(GlobalNames::class)->translations('csv', __DIR__.'/../../lang', $this->app->make('translation.loader'));
         $this->publishes([__DIR__.'/../../lang' => lang_path('vendor/nvl-csv')], 'nvl-csv-translations');
-        $this->publishes([__DIR__.'/../../resources/boost/skills' => base_path('.agents/skills')], 'csv-skills');
+        $this->publishes([__DIR__.'/../../resources/boost/skills' => base_path('.agents/skills')], 'nvl-csv-skills');
     }
 }
