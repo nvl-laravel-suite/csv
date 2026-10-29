@@ -1,6 +1,6 @@
 # NVL CSV
 
-`nvl/csv` provides CSV analysis, synchronous import, export, and staged Laravel queue batches. It requires PHP 8.4, Laravel 13, and `nvl/core:^6.0`. Laravel discovers `Nvl\Csv\Providers\CsvServiceProvider`. The package has no model, table, route, or Data/TypeScript runtime registration.
+`nvl/csv` provides CSV analysis, synchronous import, export, and staged Laravel queue batches. It requires PHP 8.4, Laravel 13, and `nvl/core:^7.0`. Laravel discovers `Nvl\Csv\Providers\CsvServiceProvider`. The package has no model, table, route, or Data/TypeScript runtime registration.
 
 ## Native operations
 
@@ -32,6 +32,8 @@ $csv = app(CsvExporter::class)->export(
 ```
 
 Options and results are documented arrays with snake_case keys. Unknown options and invalid types fail explicitly. `CsvAnalyzer::analyzeDisk($disk, $path)` reads from a Laravel disk; `quickAnalyze($path)` gives a small structural preview. Encoding and dialect detection are recommendations that the host should confirm before a consequential import.
+
+Duplicate checks preserve strict value types across all configured unique fields. A row skipped for one duplicate field does not reserve values from its other fields. Scalar membership uses keyed lookup; compound mapped values retain strict comparisons.
 
 `CsvImporter` also supports `fromFile()`, `fromDisk()`, `mapField()`, `stream()`, `batch()`, and `run()` for synchronous workflows. `CSVFieldMapping` retains validated field names, types, and mapping rules. Local closures in `processRow()`, `onProgress()`, and `batch()` execute in the current process; they cannot be queued. Imports use the selected Laravel database connection (`onConnection()` or the `connection` option). A result with failed rows rolls back the enclosing import transaction. Host writes on another connection or external systems are outside that transaction. Streaming has no enclosing transaction; each configured batch has its own transaction. The first 1,000 failed row details are retained while counts stay complete.
 

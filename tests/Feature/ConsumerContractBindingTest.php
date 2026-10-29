@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
+use Illuminate\Filesystem\FilesystemServiceProvider;
 use Illuminate\Foundation\Application;
 use Nvl\Csv\Contracts\CSVRowHandler;
 use Nvl\Csv\Providers\CsvServiceProvider;
@@ -36,6 +37,8 @@ it('resolves each native workflow without Data or Tenancy bindings', function ()
 it('preserves early host class bindings in a second native application', function (): void {
     $consumer = new Application($this->app->basePath());
     $consumer->instance('config', new Repository($this->app->make('config')->all()));
+    $consumer->instance('env', 'testing');
+    $consumer->register(FilesystemServiceProvider::class);
     $host = new stdClass;
     $consumer->instance(CsvAnalyzer::class, $host);
     try {

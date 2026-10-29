@@ -349,6 +349,72 @@ it('applies skip, error, and pass-through duplicate strategies', function (): vo
         ->and($errored['errors'][0])->toContain('Duplicate value');
 });
 
+it('does not reserve unique values from rows rejected by another unique field', function (): void {
+    $path = $this->temporaryCsv("id,email\n1,first@example.com\n2,first@example.com\n2,second@example.com\n");
+    $rows = [];
+
+    $result = CsvImporter::make()
+        ->fromFile($path)
+        ->detectDuplicates('id')
+        ->detectDuplicates('email')
+        ->withDuplicateStrategy(CSVDuplicateStrategyEnum::SKIP)
+        ->processRow(function (array $row) use (&$rows): void {
+            $rows[] = $row;
+        })
+        ->run();
+
+    expect($result['successful_rows'])->toBe(2)
+        ->and($result['skipped_rows'])->toBe(1)
+        ->and($rows)->toBe([
+            ['id' => '1', 'email' => 'first@example.com'],
+            ['id' => '2', 'email' => 'second@example.com'],
+        ]);
+});
+
+it('preserves strict duplicate semantics for transformed scalar and compound values', function (): void {
+    $firstObject = new stdClass;
+    $secondObject = new stdClass;
+    $values = [
+        '0', 0, 0.0, -0.0, false, null, '', true, 1, '1', 1.0,
+        '0', false, null, $firstObject, $firstObject, $secondObject,
+        ['key' => 1], ['key' => '1'], ['key' => 1],
+        ['a' => 1, 'b' => 2], ['b' => 2, 'a' => 1],
+        NAN, NAN, INF, INF, -INF, -INF,
+        [$firstObject], [$secondObject], [$firstObject],
+    ];
+    $path = $this->temporaryCsv("value\n".implode("\n", range(1, count($values)))."\n");
+    $acceptedRows = [];
+
+    $result = CsvImporter::make()
+        ->fromFile($path)
+        ->mapField('value', 'value', CSVFieldMapping::withTransformer(
+            'value',
+            'value',
+            static fn (mixed $value): mixed => $values[(int) $value - 1],
+        ))
+        ->detectDuplicates('value')
+        ->processRow(function (array $row, int $rowNumber) use (&$acceptedRows): void {
+            $acceptedRows[] = $rowNumber;
+        })
+        ->run();
+
+    expect($acceptedRows)->toBe([1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 15, 17, 18, 19, 21, 22, 23, 24, 25, 27, 29, 30])
+        ->and($result['successful_rows'])->toBe(22)
+        ->and($result['skipped_rows'])->toBe(9);
+});
+
+it('tracks duplicates across a large unique CSV field', function (): void {
+    $path = $this->temporaryCsv("id\n".implode("\n", range(1, 20000))."\n1\n10000\n20000\n");
+
+    $result = CsvImporter::make()
+        ->fromFile($path)
+        ->detectDuplicates('id')
+        ->run();
+
+    expect($result['successful_rows'])->toBe(20000)
+        ->and($result['skipped_rows'])->toBe(3);
+});
+
 it('uses unique field mappings and reports validation failures', function (): void {
     $path = $this->temporaryCsv("id,email\n1,invalid\n1,second@example.com\n");
     $mapping = new CSVFieldMapping(

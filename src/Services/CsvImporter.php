@@ -119,7 +119,7 @@ final class CsvImporter
 
     private bool $diagnosticsTruncated = false;
 
-    /** @var array<string, array<mixed>> */
+    /** @var array<string, array<string, list<mixed>>> */
     private array $uniqueIndexes = [];
 
     /**
@@ -1187,13 +1187,15 @@ final class CsvImporter
             }
         }
 
-        foreach ($this->uniqueIndexes as $csvField => $seenValues) {
+        $uniqueValues = [];
+        foreach (array_keys($this->uniqueIndexes) as $csvField) {
             $mapping = $this->fieldMappings[$csvField] ?? null;
             $value = $mapping === null
                 ? ($rowData[$csvField] ?? null)
                 : ($processedData[$mapping->targetField] ?? null);
 
-            if (in_array($value, $seenValues, true)) {
+            $indexKey = $this->uniqueValueKey($value);
+            if (in_array($value, $this->uniqueIndexes[$csvField][$indexKey] ?? [], true)) {
                 if ($this->duplicateStrategy === CSVDuplicateStrategyEnum::SKIP) {
                     return null;
                 }
@@ -1207,7 +1209,11 @@ final class CsvImporter
                 continue;
             }
 
-            $this->uniqueIndexes[$csvField][] = $value;
+            $uniqueValues[$csvField] = [$indexKey, $value];
+        }
+
+        foreach ($uniqueValues as $csvField => [$indexKey, $value]) {
+            $this->uniqueIndexes[$csvField][$indexKey][] = $value;
         }
 
         // Apply custom row processor if set
@@ -1573,6 +1579,16 @@ final class CsvImporter
         }
 
         $this->progress = ['status' => 'pending', 'processed_rows' => 0];
+    }
+
+    /** Bucket scalar values without serializing objects or changing strict compound comparisons. */
+    private function uniqueValueKey(mixed $value): string
+    {
+        if (is_scalar($value) || $value === null) {
+            return serialize(is_float($value) && $value === 0.0 ? 0.0 : $value);
+        }
+
+        return 'compound';
     }
 
     /**
