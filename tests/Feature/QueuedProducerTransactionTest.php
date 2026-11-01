@@ -41,11 +41,16 @@ function csvProducerBatchSchema(?string $connection = null): void
 }
 
 beforeEach(function (): void {
+    Schema::dropIfExists('job_batches');
     Storage::fake('local');
     config(['queue.default' => 'sync', 'queue.connections.sync.after_commit' => false, 'queue.batching.database' => DB::getDefaultConnection()]);
     app(CSVHandlerRegistry::class)->register('committed-probe', CsvCommittedProducerProbe::class);
     CsvCommittedProducerProbe::$source = null;
     CsvCommittedProducerProbe::$levels = [];
+});
+
+afterEach(function (): void {
+    Schema::dropIfExists('job_batches');
 });
 
 it('refuses source producer transactions before staging a batch', function (int $depth): void {

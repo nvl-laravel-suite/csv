@@ -1,6 +1,6 @@
 # Upgrading NVL CSV to Light
 
-Upgrade CSV and its selected NVL dependency closure together to the transitional `^6.0` line. The Laravel floor is 13 and PHP floor is 8.4. Install Laravel Testbench `^11.0` for host package tests.
+Upgrade CSV and its selected NVL dependency closure together to the native `^7.0` line. The Laravel floor is 13 and PHP floor is 8.4. Install Laravel Testbench `^11.0` for host package tests.
 
 ## Replace the runtime API
 
@@ -17,6 +17,10 @@ Drain or cancel old CSV jobs and staged manifests before deploying the native wo
 For queued options, pass enum instances or their exact backed strings for `encoding`, `processing_mode`, and `duplicate_strategy`. The manifest stores the backed strings. `CSVDelimiterEnum` normalizes to its delimiter character; `column_types` enum values normalize to backed strings. Other objects remain unsupported. Invalid enum strings fail before staging.
 
 Configure a shared private work disk, Laravel's queue batch repository, and workers with `retry_after` above the 300 second job timeout. Native Ownership captures and re-admits worker context; the retired `TenantContext`, `TenantRunner`, and legacy work-store fallback are removed. A null owner context is never an authority grant. The optional `nvl/ownership` integration must be configured explicitly. `CSVWorkReference` now carries a native Ownership envelope.
+
+Configure `nvl-csv.locks.store` to an atomic cache shared by every worker; omission inherits Core then Laravel's cache store. Chunk jobs recheck current admission inside that lock. Its 360-second lease exceeds the 300-second job timeout, so set `retry_after` above 360 seconds and restart old workers before accepting new deliveries. Mapping validation now raises `CSVValidationException` with row/field diagnostics instead of an ownership violation.
+
+Failed/cancelled private staging can contain PII and remains available for recovery. Define host retention and scoped storage retirement after reconciliation and after all active/retry deliveries have drained, under the batch’s matching admitted owner/unowned boundary. Cancelling a batch does not itself delete staging; no public failed-work cleanup method or prune command is provided.
 
 CSV chunk checksums and completion seals protect staged work and suppress replay after a complete chunk. A retry after a partial handler failure can repeat prior row side effects. Use application idempotency keys or transactions appropriate to the handler's target system. Do not infer exactly-once external effects from the queue batch status.
 

@@ -6,12 +6,15 @@ namespace Nvl\Csv\Jobs;
 
 use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Enums\CSVTypeEnum;
+use Nvl\Csv\Exceptions\CSVValidationException;
 use Nvl\Csv\Services\CSVHandlerRegistry;
 use Nvl\Csv\Services\CSVWorkStore;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
@@ -66,6 +69,22 @@ final class ProcessCSVChunkJob implements OwnershipQueuedJob, ShouldQueue
     /** Validate the manifest and chunk before resolving the host's registered handler. */
     public function handle(CSVWorkStore $workStore, CSVHandlerRegistry $handlers): void
     {
+        $workStore->read($this->work, $this->manifestChecksum);
+        $store = Cache::store(PackageOptions::lockStore('csv'))->getStore();
+        if (! $store instanceof LockProvider) {
+            throw new RuntimeException('The configured CSV lock store must support atomic locks.');
+        }
+        $key = 'nvl:csv:chunk:'.hash('sha256', json_encode([
+            $this->ownership->toArray(), $this->work->disk, $this->work->manifestPath, $this->chunkIndex,
+        ], JSON_THROW_ON_ERROR));
+        $store->lock($key, 360)->block(5, function () use ($workStore, $handlers): void {
+            $this->processChunk($workStore, $handlers);
+        });
+    }
+
+    /** Re-admit captured work after acquiring its lock, including every replay and retry. */
+    private function processChunk(CSVWorkStore $workStore, CSVHandlerRegistry $handlers): void
+    {
         $manifest = $workStore->read($this->work, $this->manifestChecksum);
         $chunks = $manifest['chunks'] ?? null;
         $options = $manifest['options'] ?? null;
@@ -115,7 +134,9 @@ final class ProcessCSVChunkJob implements OwnershipQueuedJob, ShouldQueue
                 foreach ($fieldMappings as $source => $mapping) {
                     $value = $row['data'][$source] ?? $mapping->defaultValue;
                     if (($options['validate_data'] ?? true) && ! $mapping->validate($value)) {
-                        throw new OwnershipViolation(implode(', ', $mapping->getValidationErrors($value)));
+                        throw CSVValidationException::rowValidationFailed($row['row_number'], [
+                            $mapping->sourceField => $mapping->getValidationErrors($value),
+                        ]);
                     }
                     $data[$mapping->targetField] = $mapping->apply($value);
                 }

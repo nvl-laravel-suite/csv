@@ -18,6 +18,42 @@ use Nvl\Csv\Services\CsvImporter;
 use Nvl\Csv\ValueObjects\CSVConfiguration;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
 
+it('rejects nonfiles and unreadable sources without disclosing their paths', function (string $source): void {
+    $path = $source === 'directory' ? sys_get_temp_dir() : $this->temporaryCsv("name\nAda\n");
+    if ($source === 'unreadable') {
+        chmod($path, 0000);
+        clearstatcache(true, $path);
+        if (is_readable($path)) {
+            chmod($path, 0600);
+            $this->markTestSkipped('The current OS principal can still read a mode0000 file.');
+        }
+    }
+
+    try {
+        try {
+            CsvImporter::make()->fromFile($path);
+            $this->fail('Expected the source to reject before parsing.');
+        } catch (CSVFileNotFoundException $exception) {
+            expect($exception->responseCode())->toBe('file_not_found')
+                ->and($exception->getMessage())->toBe('CSV source must be a readable file.')
+                ->and($exception->getContext())->toBe([])
+                ->and(json_encode($exception->toArray(), JSON_THROW_ON_ERROR))->not->toContain($path);
+        }
+    } finally {
+        if ($source === 'unreadable') {
+            chmod($path, 0600);
+        }
+    }
+})->with(['directory', 'unreadable']);
+
+it('retains ordinary readable files and local file URIs as import sources', function (bool $uri): void {
+    $path = $this->temporaryCsv("name\nAda\n");
+    $source = $uri ? 'file://'.$path : $path;
+
+    expect(array_values(iterator_to_array(CsvImporter::make()->fromFile($source)->stream())))
+        ->toBe([['name' => 'Ada']]);
+})->with([false, true]);
+
 it('preserves trailing backslashes in standard quoted CSV fields', function (): void {
     $path = $this->temporaryCsv("path,label\n\"folder,\\\",first\nplain,second\n");
     $import = CsvImporter::make()

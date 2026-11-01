@@ -319,6 +319,25 @@ it('applies formula policy after converting stringable and backed enum cells', f
     ]))->toThrow(CSVConfigurationException::class);
 });
 
+it('preserves typed negative numbers while guarding untrusted numeric strings', function (string $policy): void {
+    $csv = CsvExporter::make()->export([['integer' => -5, 'decimal' => -2.5]], [
+        'headings' => ['integer', 'decimal'], 'formula_policy' => $policy,
+    ]);
+
+    expect(str_getcsv(explode("\n", $csv)[1], escape: ''))->toBe(['-5', '-2.5']);
+
+    if ($policy === 'reject') {
+        expect(fn (): string => CsvExporter::make()->export([['value' => '-5']], [
+            'headings' => ['value'], 'formula_policy' => $policy,
+        ]))->toThrow(CSVConfigurationException::class);
+    } else {
+        $text = CsvExporter::make()->export([['value' => '-5']], [
+            'headings' => ['value'], 'formula_policy' => $policy,
+        ]);
+        expect(str_getcsv(explode("\n", $text)[1], escape: ''))->toBe(["'-5"]);
+    }
+})->with(['escape', 'reject']);
+
 it('applies formula policy to explicit and inferred headings', function (): void {
     $explicit = CsvExporter::make()->export([['value' => 'safe']], ['headings' => ['=EXPLOIT()']]);
     $inferred = CsvExporter::make()->export([['=EXPLOIT()' => 'safe']], []);

@@ -352,19 +352,19 @@ final class CsvImporter
     /**
      * Set the local file path to import from.
      *
-     * Validates that the file exists and sets up import options with the file path.
+     * Validate a readable regular file and set up import options with the file path.
      * This method is used for importing from local filesystem files.
      *
      * @param  string  $path  Absolute path to the CSV file to import
      * @return self Returns this instance for method chaining
      *
-     * @throws CSVFileNotFoundException If the specified file does not exist
+     * @throws CSVFileNotFoundException If the source is not a readable regular file
      * @throws Exception If options cannot be created or updated
      */
     public function fromFile(string $path): self
     {
-        if (! file_exists($path)) {
-            throw CSVFileNotFoundException::fileNotFound($path);
+        if (! is_file($path) || ! is_readable($path)) {
+            throw new CSVFileNotFoundException('CSV source must be a readable file.');
         }
 
         $this->options = array_merge($this->options, ['file_path' => $path]);

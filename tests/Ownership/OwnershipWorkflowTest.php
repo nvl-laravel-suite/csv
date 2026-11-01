@@ -2,13 +2,20 @@
 
 declare(strict_types=1);
 
+use Illuminate\Cache\Repository;
+use Illuminate\Contracts\Cache\Lock;
+use Illuminate\Contracts\Cache\LockProvider;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Enums\CSVEncodingEnum;
+use Nvl\Csv\Enums\CSVTypeEnum;
+use Nvl\Csv\Exceptions\CSVValidationException;
 use Nvl\Csv\Services\CSVAsyncProcessor;
 use Nvl\Csv\Services\CSVHandlerRegistry;
 use Nvl\Csv\Services\CSVWorkStore;
 use Nvl\Csv\Tests\OwnerScopeTestCase;
+use Nvl\Csv\ValueObjects\CSVFieldMapping;
 use Nvl\Csv\ValueObjects\CSVWorkReference;
 use Nvl\Ownership\Services\OwnershipQueueContext;
 use Nvl\Ownership\Services\OwnershipRunner;
@@ -19,6 +26,63 @@ use Nvl\Support\Ownership\Exceptions\OwnershipViolation;
 use Nvl\Support\Ownership\ValueObjects\OwnershipJobEnvelope;
 
 uses(OwnerScopeTestCase::class);
+
+it('rechecks owner admission after waiting for the configured chunk lock', function (): void {
+    $path = tempnam(sys_get_temp_dir(), 'nvl_csv_');
+    file_put_contents($path, "name\nRejected after waiting\n");
+    try {
+        app(OwnershipRunner::class)->run(Company::findOrFail(7), Actor::findOrFail(1), function () use ($path): void {
+            app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('ownership-rows')->processAsync();
+            $payload = json_decode(DB::table('jobs')->sole()->payload, true, flags: JSON_THROW_ON_ERROR);
+            $job = unserialize($payload['data']['command']);
+            config()->set('nvl-csv.locks.store', 'csv_waiting_lock');
+            $lock = Mockery::mock(Lock::class);
+            $lock->shouldReceive('block')->once()->andReturnUsing(static function (int $wait, Closure $operation): void {
+                DB::table('ownership_test_companies')->where('id', 7)->update(['active' => false]);
+                $operation();
+            });
+            $store = Mockery::mock(LockProvider::class);
+            $store->shouldReceive('lock')->once()->andReturn($lock);
+            $repository = Mockery::mock(Repository::class);
+            $repository->shouldReceive('getStore')->once()->andReturn($store);
+            Cache::shouldReceive('store')->once()->with('csv_waiting_lock')->andReturn($repository);
+
+            expect(fn () => $job->handle(app(CSVWorkStore::class), app(CSVHandlerRegistry::class)))
+                ->toThrow(OwnershipViolation::class)
+                ->and(DB::table('ownership_queue_probes')->where('stage', 'csv-row')->count())->toBe(0)
+                ->and(Storage::disk('local')->exists(dirname($job->work->manifestPath).'/chunks/0.json'))->toBeTrue();
+        });
+    } finally {
+        unlink($path);
+    }
+});
+
+it('reports queued mapping failures as row validation while retaining retry work and owner isolation', function (): void {
+    $path = tempnam(sys_get_temp_dir(), 'nvl_csv_');
+    file_put_contents($path, "age\nnot-an-integer\n");
+    try {
+        app(OwnershipRunner::class)->run(Company::findOrFail(7), Actor::findOrFail(1), function () use ($path): void {
+            app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('ownership-rows')
+                ->mapField('age', 'years', CSVFieldMapping::typed('age', 'years', CSVTypeEnum::INTEGER))->processAsync();
+            $payload = json_decode(DB::table('jobs')->sole()->payload, true, flags: JSON_THROW_ON_ERROR);
+            $job = unserialize($payload['data']['command']);
+            try {
+                $job->handle(app(CSVWorkStore::class), app(CSVHandlerRegistry::class));
+                throw new LogicException('Invalid queued row reached its handler.');
+            } catch (CSVValidationException $error) {
+                expect($error->getAffectedRows())->toBe([1])
+                    ->and($error->getRowErrors(1))->toBe(['age' => ["Field 'age' must be of type integer"]]);
+            }
+            $chunk = dirname($job->work->manifestPath).'/chunks/0.json';
+            expect(DB::table('ownership_queue_probes')->where('stage', 'csv-row')->count())->toBe(0)
+                ->and(Storage::disk('local')->exists($chunk))->toBeTrue()
+                ->and(Storage::disk('local')->exists($chunk.'.done'))->toBeFalse()
+                ->and(Storage::disk('local')->exists($job->work->manifestPath))->toBeTrue();
+        });
+    } finally {
+        unlink($path);
+    }
+});
 
 it('stages captured private chunks and keeps status cancellation and manifests inside the native owner', function (): void {
     $path = tempnam(sys_get_temp_dir(), 'nvl_csv_');

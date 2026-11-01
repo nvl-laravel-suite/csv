@@ -858,7 +858,7 @@ final class CsvExporter
             default => throw new InvalidArgumentException('CSV values must be scalar, null, arrays, or objects.'),
         };
 
-        return $this->applyFormulaPolicy($text);
+        return is_int($value) || is_float($value) ? $text : $this->applyFormulaPolicy($text);
     }
 
     private function applyFormulaPolicy(string $text): string

@@ -1,18 +1,76 @@
 ---
 name: nvl-csv
-description: Implement or test native CSV analysis, import, export, and registered queued row handling in Laravel 13.
+description: Use when integrating CSV analysis, synchronous import or export, streaming batches, or registered queued CSV handlers in Laravel.
 ---
 
 # NVL CSV
 
-Use `Nvl\Csv\Services\CsvAnalyzer`, `CsvImporter`, and `CsvExporter` for package-owned validation and processing. Their native entry points are `analyze($path, $options = [])`, `import($path, $options, CSVRowHandler $handler)`, and `export($rows, $options)`. Options and results are snake_case arrays. Keep host HTTP DTOs, Actions, and TypeScript types in the consuming application. Inspect the package README and service option allowlists before calling them.
+Use the native CSV services for parsing, validation and processing.
+The application owns uploads, authentication, domain persistence and HTTP responses.
+CSV exposes no package model, route, migration or domain event.
 
-Treat source CSV as untrusted. Select dialect, encoding, header policy, duplicate strategy, row limits, selected database connection, and error threshold deliberately. The default escape is empty for doubled quotes. Synchronous import can use local callbacks and rolls back its selected connection when rows fail; side effects on other connections or external systems need host coordination. Stream for pull processing and use bounded batches where needed. Field mapping and CSV configuration objects enforce their own invariants.
+## Read the relevant reference
 
-Exports should set trusted fields and headings when order matters. Spreadsheet formula cells and headings are escaped after conversion by default, including backed enums and Stringable values; choose `reject` for strict output or explicit `allow` only for trusted values. Test reordered keys, quoting, encodings, malformed rows, and formula handling.
+- [Installation](references/installation.md): prerequisites, provider discovery, published resources and configuration.
+- [API](references/api.md): exact public signatures, enum values and result shapes.
+- [Usage](references/usage.md): option allowlists, synchronous mapping, streaming, exports and durable queued handlers.
 
-For queued imports, register a durable `CSVRowHandler` class and immutable alias/version through `CSVHandlerRegistry`, then use `CSVAsyncProcessor::usingHandler()`. Consumer closures, callback-bearing mappings, and arbitrary serialized option objects are refused. Configure a shared private work disk, a queue batch repository, and a retry window greater than the 300 second job timeout. Staged JSON chunks carry checksums and native Ownership envelopes. Workers re-admit the envelope and resolve the handler from the registry. Do not treat completion seals as exactly-once protection for handler side effects after partial failure; make host handlers idempotent.
+Read the usage section for the operation and its options; consult API for native types and factories.
 
-Queued `encoding`, `processing_mode`, and `duplicate_strategy` use exact enum backed strings in JSON manifests; the producer accepts the matching enum instances and normalizes them. A CSV delimiter enum becomes its character, and `column_types` enums become backed strings. Invalid scalar values and other objects are rejected before staging. The `error` duplicate policy aborts staging rather than silently omitting a failed row.
+## Choose the operation
 
-Ownership is optional and explicit. Use native Ownership runner admission when installed; null context grants no owner privilege. No Tenancy bridge API or Data/TypeScript runtime belongs in the CSV package. CSV declares no domain events. Use the owning package tests and independent installed consumer to verify package boundaries.
+| Need | Native capability |
+| --- | --- |
+| Inspect an untrusted source | `CsvAnalyzer::analyze`, `analyzeDisk`, `quickAnalyze` |
+| Persist rows through host logic | `CsvImporter::import` with `CSVRowHandler` |
+| Pull rows or commit bounded batches | Importer's `stream` or `batch` |
+| Return encoded CSV bytes | `CsvExporter::export` |
+| Write a large artifact to a disk | Exporter's `fromQuery`, `fromCollection`, `fromArray`, `stream` |
+| Enqueue registered row processing | `CSVHandlerRegistry` and `CSVAsyncProcessor` |
+| Compose local field/row rules | `CSVTransformer` family and `CSVFieldValidator`/`CSVRowValidator` |
+
+## Input and output contract
+
+Options and results use snake_case native arrays.
+Reject unknown keys rather than forwarding request input wholesale.
+Analysis accepts no options currently; its dialect and encoding findings are recommendations.
+Select the input encoding, delimiter, headers, mapping, duplicate strategy and row limits deliberately.
+Default dialect uses comma, double-quote enclosure and empty escape for doubled quotes.
+Headers, empty-row skipping and value trimming default to enabled; strict row width defaults to disabled.
+A supplied mapping selects output fields, so declare every field the handler needs.
+Use explicit null only where the operation permits it; omission selects the documented default or preserves fluent configuration.
+Results report counts and diagnostics; they do not replace host domain models.
+
+## Persistence and effects
+
+Synchronous imports default to a transaction on the selected connection.
+A result containing failed rows rolls that import back; writes on another connection and external effects need host coordination.
+Streaming opens no encompassing transaction; each configured batch has its own transaction.
+Retained failure details are bounded to 1,000 while total counts remain complete.
+Duplicate tracking retains seen values and therefore grows with the number of distinct keys.
+Ordinary scalar values use keyed buckets; compound values retain strict comparisons.
+
+## Output and workers
+
+Choose trusted field order and headings explicitly for stable exports.
+Formula policy defaults to `escape`, including headings and converted Stringable/enum cells.
+Use `reject` for strict rejection or `allow` only when the host deliberately trusts the data.
+The byte-returning `export` must fit its final string in memory; disk-backed paths stream output.
+Queued work accepts an immutable registered handler alias/version, not consumer closures.
+Chunks and manifests are private, checksum protected and bound to captured native Ownership context.
+A shared atomic cache lock serializes each captured chunk and rechecks admission before effects.
+Completion seals prevent completed-chunk replay; partial handler effects can repeat after failure or a crash.
+Make host effects idempotent and keep work available through the retry window.
+
+## Host decisions and verification
+
+CSV has no actor policy seam; the host authorizes source access, destinations and handler effects.
+Ownership is optional; use admitted native context when enabled, never a legacy Tenancy bridge.
+Boot must remain possible with the optional Ownership library absent.
+Use a shared private work disk, Laravel batch storage and a shared atomic `nvl-csv.locks.store` (Core/cache default inheritance applies).
+The job timeout is 300 seconds and lock lease is 360 seconds; set `retry_after` above the lease and restart old workers before rollout.
+Staging can contain PII. The host owns failed-work retention and storage retirement after retries/reconciliation; cancellation alone does not delete it.
+CSV exposes no public failed-work cleanup method or prune command.
+Test actual parsing, mapped values, selected-connection rollback, formula policy and failed/replayed chunks.
+Run the affected host tests with `php artisan test --compact`; CSV adds no maintenance Artisan command.
+Keep consumer DTOs, Actions, controllers and frontend types outside the package.

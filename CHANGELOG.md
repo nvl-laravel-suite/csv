@@ -5,6 +5,20 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- Align NVL peers and consumer contracts on the coordinated 7.x line. Review [UPGRADING.md](UPGRADING.md) for adoption and application-owned integration requirements.
+
+### Fixed
+
+- Reject nonfile and unreadable local import sources before parsing with a path-free native failure; retain readable ordinary files and local file URIs.
+- Serialize concurrent deliveries of the same captured chunk on the configured atomic lock store and recheck current admission before handler effects.
+- Report queued mapping failures through row-aware `CSVValidationException` diagnostics while retaining failed work.
+
+### Documentation
+
+- Require shared lock storage and describe lock/retry timing, host idempotency, PII retention and scoped retirement of failed staging.
+
 ## [6.0.0] - 2026-10-20
 
 ### Changed
