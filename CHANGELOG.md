@@ -5,9 +5,17 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+## [7.0.1] - 2026-11-05
+
 ### Fixed
 
 - Reject invalid local and disk analyzer sources before reading, using path-free native failures while retaining readable files and local file URIs.
+
+<!-- NVL GENERATED CHANGES START -->
+### Changed
+
+- validate analyzer sources before reading
+<!-- NVL GENERATED CHANGES END -->
 
 ## [7.0.0] - 2026-11-03
 
