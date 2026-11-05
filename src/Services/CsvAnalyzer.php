@@ -98,7 +98,7 @@ final class CsvAnalyzer
      * @param  string  $filePath  Absolute path to the CSV file to analyze
      * @return array<string,mixed> Complete analysis results with recommendations and statistics
      *
-     * @throws CSVFileNotFoundException If the specified file does not exist or cannot be accessed
+     * @throws CSVFileNotFoundException If the source is not a readable regular file
      * @throws RuntimeException If file operations fail or system resources are unavailable
      * @throws Exception If analysis operations encounter unexpected errors
      * @throws DivisionByZeroError If statistical calculations encounter division by zero
@@ -114,8 +114,8 @@ final class CsvAnalyzer
 
         $startTime = microtime(true);
 
-        if (! file_exists($filePath)) {
-            throw CSVFileNotFoundException::fileNotFound($filePath);
+        if (! is_file($filePath) || ! is_readable($filePath)) {
+            throw new CSVFileNotFoundException('CSV source must be a readable file.');
         }
 
         $this->resetState();
@@ -138,7 +138,7 @@ final class CsvAnalyzer
      * @param  string  $path  Path to the file on the specified storage disk
      * @return array<string,mixed> Complete analysis results with recommendations and statistics
      *
-     * @throws CSVFileNotFoundException If the file does not exist on the specified disk
+     * @throws CSVFileNotFoundException If the disk source is missing or is not a file
      * @throws RuntimeException If file operations or disk access fails
      * @throws Exception If analysis operations encounter unexpected errors
      * @throws DivisionByZeroError If statistical calculations encounter division by zero
@@ -147,8 +147,8 @@ final class CsvAnalyzer
     {
         $diskInstance = Storage::disk($disk);
 
-        if (! $diskInstance->exists($path)) {
-            throw CSVFileNotFoundException::fileNotFoundOnDisk($disk, $path);
+        if (! $diskInstance->fileExists($path)) {
+            throw new CSVFileNotFoundException('CSV source must be a readable file.');
         }
 
         $this->resetState();
@@ -170,13 +170,13 @@ final class CsvAnalyzer
      * @param  string  $filePath  Absolute path to the CSV file to analyze
      * @return array<string, mixed> Basic file properties including size, encoding, delimiter, and headers
      *
-     * @throws CSVFileNotFoundException If the specified file does not exist
+     * @throws CSVFileNotFoundException If the source is not a readable regular file
      * @throws RuntimeException If file operations fail
      */
     public function quickAnalyze(string $filePath): array
     {
-        if (! file_exists($filePath)) {
-            throw CSVFileNotFoundException::fileNotFound($filePath);
+        if (! is_file($filePath) || ! is_readable($filePath)) {
+            throw new CSVFileNotFoundException('CSV source must be a readable file.');
         }
 
         $this->resetState();

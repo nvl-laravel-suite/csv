@@ -8,6 +8,64 @@ use Nvl\Csv\Enums\CSVEncodingEnum;
 use Nvl\Csv\Exceptions\CSVFileNotFoundException;
 use Nvl\Csv\Services\CsvAnalyzer;
 
+it('rejects invalid local analysis sources before reading without disclosing paths', function (string $method, string $source): void {
+    $path = $source === 'directory' ? sys_get_temp_dir() : $this->temporaryCsv("name\nAda\n");
+    if ($source === 'missing') {
+        $path .= '.missing';
+    }
+    if ($source === 'unreadable') {
+        chmod($path, 0000);
+        clearstatcache(true, $path);
+        if (is_readable($path)) {
+            chmod($path, 0600);
+            $this->markTestSkipped('The current OS principal can still read a mode0000 file.');
+        }
+    }
+
+    try {
+        try {
+            (new CsvAnalyzer)->{$method}($path);
+            $this->fail('Expected the analysis source to reject before reading.');
+        } catch (CSVFileNotFoundException $exception) {
+            expect($exception->responseCode())->toBe('file_not_found')
+                ->and($exception->getMessage())->toBe('CSV source must be a readable file.')
+                ->and($exception->getContext())->toBe([])
+                ->and(json_encode($exception->toArray(), JSON_THROW_ON_ERROR))->not->toContain($path);
+        }
+    } finally {
+        if ($source === 'unreadable') {
+            chmod($path, 0600);
+        }
+    }
+})->with(['analyze', 'quickAnalyze'])->with(['directory', 'missing', 'unreadable']);
+
+it('retains readable local files and file URIs as analysis sources', function (string $method, bool $uri): void {
+    $path = $this->temporaryCsv("name\nAda\n");
+    $result = (new CsvAnalyzer)->{$method}($uri ? 'file://'.$path : $path);
+
+    expect($result['headers'])->toBe(['name'])
+        ->and($result['column_count'])->toBe(1)
+        ->and($result[$method === 'analyze' ? 'row_count' : 'sample_rows'])->toBe(1);
+})->with(['analyze', 'quickAnalyze'])->with([false, true]);
+
+it('rejects missing disk paths and directories before analysis metadata reads', function (string $source): void {
+    Storage::fake('invalid-analysis');
+    $path = 'incoming/private-'.$source;
+    if ($source === 'directory') {
+        Storage::disk('invalid-analysis')->makeDirectory($path);
+    }
+
+    try {
+        (new CsvAnalyzer)->analyzeDisk('invalid-analysis', $path);
+        $this->fail('Expected a regular file on the analysis disk.');
+    } catch (CSVFileNotFoundException $exception) {
+        expect($exception->responseCode())->toBe('file_not_found')
+            ->and($exception->getMessage())->toBe('CSV source must be a readable file.')
+            ->and($exception->getContext())->toBe([])
+            ->and(json_encode($exception->toArray(), JSON_THROW_ON_ERROR))->not->toContain($path);
+    }
+})->with(['directory', 'missing']);
+
 it('analyzes standard quoted fields ending in a backslash', function (): void {
     $path = $this->temporaryCsv("path,label\n\"folder,\\\",first\nplain,second\n");
     $result = (new CsvAnalyzer)->analyze($path);
