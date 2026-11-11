@@ -5,6 +5,8 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+## [7.0.2] - 2026-11-11
+
 ### Fixed
 
 - Apply `trim_values` to imported data cells, not only headers, before validation, duplicate detection and empty-row skipping.
@@ -18,6 +20,12 @@ All notable changes to `nvl/csv` are documented here.
 - Detect UTF-8 when the analyzer's detection sample ends inside a multibyte character, and describe a column from its first non-empty cell.
 - Read decimal commas in `NumericTransformer` (`1.234,56`, `1,5`) instead of dropping the separator.
 - Reject line breaks in `CSVFieldValidator::email()` and `phone()`, and stop treating `0` as empty in `CSVFilter::field()->isEmpty()`/`isNotEmpty()`.
+
+<!-- NVL GENERATED CHANGES START -->
+### Changed
+
+- correct detection, coercion, export destinations and staging refusals
+<!-- NVL GENERATED CHANGES END -->
 
 ## [7.0.1] - 2026-11-05
 
