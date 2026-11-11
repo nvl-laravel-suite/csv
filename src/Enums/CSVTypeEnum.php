@@ -93,7 +93,7 @@ enum CSVTypeEnum: string
         return match ($this) {
             self::STRING, self::NULLABLE_STRING => is_string($value) || is_int($value) || is_float($value),
             self::INTEGER, self::NULLABLE_INTEGER => $this->isValidInteger($value),
-            self::FLOAT, self::NULLABLE_FLOAT => is_numeric($value),
+            self::FLOAT, self::NULLABLE_FLOAT => is_numeric($value) && is_finite((float) $value),
             self::BOOLEAN => $this->isValidBoolean($value),
             self::DATE, self::DATETIME => $this->isValidDate($value),
             self::EMAIL => $this->isValidEmail($value),
@@ -480,7 +480,7 @@ enum CSVTypeEnum: string
             return (float) $value;
         }
 
-        if (! is_string($value) || ! is_numeric($value)) {
+        if (! is_string($value) || ! is_numeric($value) || ! is_finite((float) $value)) {
             throw new InvalidArgumentException(
                 'Cannot cast '.$this->describeValue($value).' to float.',
             );
@@ -506,6 +506,10 @@ enum CSVTypeEnum: string
 
         if ($value instanceof DateTimeInterface) {
             return Carbon::instance($value);
+        }
+
+        if (is_string($value) && Carbon::hasRelativeKeywords($value)) {
+            throw new InvalidArgumentException('Date values must name a complete calendar date.');
         }
 
         $date = Carbon::parse($value);

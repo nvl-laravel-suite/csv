@@ -16,13 +16,23 @@ Drain or cancel old CSV jobs and staged manifests before deploying the native wo
 
 For queued options, pass enum instances or their exact backed strings for `encoding`, `processing_mode`, and `duplicate_strategy`. The manifest stores the backed strings. `CSVDelimiterEnum` normalizes to its delimiter character; `column_types` enum values normalize to backed strings. Other objects remain unsupported. Invalid enum strings fail before staging.
 
-Configure a shared private work disk, Laravel's queue batch repository, and workers with `retry_after` above the 300 second job timeout. Native Ownership captures and re-admits worker context; the retired `TenantContext`, `TenantRunner`, and legacy work-store fallback are removed. A null owner context is never an authority grant. The optional `nvl/ownership` integration must be configured explicitly. `CSVWorkReference` now carries a native Ownership envelope.
+Configure a shared private work disk, Laravel's queue batch repository, and workers with `retry_after` above the 360 second chunk lock lease (the job timeout is 300 seconds). Native Ownership captures and re-admits worker context; the retired `TenantContext`, `TenantRunner`, and legacy work-store fallback are removed. A null owner context is never an authority grant. The optional `nvl/ownership` integration must be configured explicitly. `CSVWorkReference` now carries a native Ownership envelope.
 
 Configure `nvl-csv.locks.store` to an atomic cache shared by every worker; omission inherits Core then Laravel's cache store. Chunk jobs recheck current admission inside that lock. Its 360-second lease exceeds the 300-second job timeout, so set `retry_after` above 360 seconds and restart old workers before accepting new deliveries. Mapping validation now raises `CSVValidationException` with row/field diagnostics instead of an ownership violation.
 
 Failed/cancelled private staging can contain PII and remains available for recovery. Define host retention and scoped storage retirement after reconciliation and after all active/retry deliveries have drained, under the batch’s matching admitted owner/unowned boundary. Cancelling a batch does not itself delete staging; no public failed-work cleanup method or prune command is provided.
 
 CSV chunk checksums and completion seals protect staged work and suppress replay after a complete chunk. A retry after a partial handler failure can repeat prior row side effects. Use application idempotency keys or transactions appropriate to the handler's target system. Do not infer exactly-once external effects from the queue batch status.
+
+## Behaviour corrections after 7.0.1
+
+- `trim_values` (default `true`) now trims data cells as well as headers. Pass `'trim_values' => false` where surrounding whitespace is significant.
+- `CSVTypeEnum::DATE`/`DATETIME` and `DateTransformer` without an input format no longer accept relative, year-less or time-only text (`tomorrow`, `sat`, `2024`, `12:30`, `1.5`); such cells fail validation or return the transformer default. `CSVTypeEnum::FLOAT` rejects values that overflow to infinity.
+- `NumericTransformer` reads `1.234,56` and `1,5` as decimal-comma numbers; `1,234` and `1,234.56` keep their grouping meaning.
+- `CSVEncodingEnum::UTF16->getPhpEncoding()` returns `UTF-16LE` and `UTF32` returns `UTF-32BE`, matching their byte order marks on every platform.
+- `CSVAsyncProcessor::processAsync()` refuses a source without data rows and aborts staging on any failed source row; cancelled batches keep their staged work.
+- `CsvExporter::withOptions()` keeps a destination already selected with `disk()`, `path()` or `filename()` when it omits those keys; `CsvImporter::withOptions()` likewise keeps a selected source.
+- `CSVFilter::field()->isEmpty()`/`isNotEmpty()` treat `0` and `"0"` as values. `CSVFieldValidator::email()` and `phone()` reject line breaks.
 
 ## Operational checks
 

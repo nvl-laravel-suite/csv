@@ -5,6 +5,20 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Apply `trim_values` to imported data cells, not only headers, before validation, duplicate detection and empty-row skipping.
+- Keep a source selected with `fromFile()`/`fromDisk()` when `withOptions()` is called afterwards, and validate a `file_path` option like `fromFile()` with a path-free failure.
+- Keep an export destination selected with `disk()`, `path()` or `filename()` when `withOptions()` is called afterwards; the file was written to the `local` disk root or the call failed for a missing filename.
+- Abort queued staging on any failed source row; `strict_mode` width mismatches were silently dropped from the staged chunks.
+- Refuse to queue a source without data rows instead of creating a batch that never finishes and an orphaned manifest.
+- Keep the staged work of a cancelled batch; it was deleted once the remaining deliveries drained without processing their rows.
+- Reject relative, year-less and time-only text (`tomorrow`, `sat`, `2024`, `12:30`, `1.5`) as `DATE`/`DATETIME` cells and in `DateTransformer`, and non-finite `FLOAT` values such as `1e999`.
+- Decode and encode `CSVEncodingEnum::UTF16`/`UTF32` without a byte order mark as UTF-16LE/UTF-32BE on every platform.
+- Detect UTF-8 when the analyzer's detection sample ends inside a multibyte character, and describe a column from its first non-empty cell.
+- Read decimal commas in `NumericTransformer` (`1.234,56`, `1,5`) instead of dropping the separator.
+- Reject line breaks in `CSVFieldValidator::email()` and `phone()`, and stop treating `0` as empty in `CSVFilter::field()->isEmpty()`/`isNotEmpty()`.
+
 ## [7.0.1] - 2026-11-05
 
 ### Fixed

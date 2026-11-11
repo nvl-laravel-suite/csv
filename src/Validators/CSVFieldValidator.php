@@ -289,7 +289,7 @@ final class CSVFieldValidator extends CSVValidator
     {
         return (new self)
             ->type(CSVTypeEnum::STRING)
-            ->pattern('/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/', 'Invalid email format');
+            ->pattern('/\A[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\z/', 'Invalid email format');
     }
 
     /**
@@ -320,7 +320,7 @@ final class CSVFieldValidator extends CSVValidator
     {
         return (new self)
             ->type(CSVTypeEnum::STRING)
-            ->pattern('/^[+]?[0-9\s\-\(\)]+$/', 'Invalid phone number format')
+            ->pattern('/\A[+]?[0-9 \-\(\)]+\z/', 'Invalid phone number format')
             ->length(10, 20);
     }
 

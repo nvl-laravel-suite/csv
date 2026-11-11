@@ -219,7 +219,9 @@ final class CsvExporter
             skipEmptyRows: $base->skipEmptyRows,
             trimValues: $base->trimValues,
         );
-        $this->options = ['path' => '', ...$options];
+        // Keep a destination chosen through disk(), path() or filename(); every other option is per call.
+        $destination = array_intersect_key($this->options, ['disk' => true, 'path' => true, 'filename' => true]);
+        $this->options = ['path' => '', ...$destination, ...array_filter($options, static fn (mixed $value): bool => $value !== null)];
 
         return $this;
     }

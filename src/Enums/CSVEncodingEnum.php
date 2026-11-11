@@ -61,6 +61,8 @@ enum CSVEncodingEnum: string
     {
         return match ($this) {
             self::UTF8_BOM => 'UTF-8', // BOM is handled separately
+            self::UTF16 => 'UTF-16LE', // iconv guesses a platform-dependent order without a BOM
+            self::UTF32 => 'UTF-32BE',
             default => $this->value,
         };
     }

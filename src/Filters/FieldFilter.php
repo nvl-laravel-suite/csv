@@ -302,12 +302,18 @@ final class FieldFilter extends CSVFilter
             'not_in' => ! $this->compareIn($fieldValue),
             'is_null' => $fieldValue === null,
             'is_not_null' => $fieldValue !== null,
-            'is_empty' => empty($fieldValue),
-            'is_not_empty' => ! empty($fieldValue),
+            'is_empty' => $this->isBlank($fieldValue),
+            'is_not_empty' => ! $this->isBlank($fieldValue),
             'matches' => $this->compareMatches($fieldValue),
             'between' => $this->compareBetween($fieldValue),
             default => throw new LogicException("Unsupported field filter operator '{$this->operator}'."),
         };
+    }
+
+    /** Match the validators: only null, an empty string and an empty array are blank; "0" is a value. */
+    private function isBlank(mixed $fieldValue): bool
+    {
+        return $fieldValue === null || $fieldValue === '' || $fieldValue === [];
     }
 
     /**

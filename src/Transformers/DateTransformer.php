@@ -244,6 +244,10 @@ final class DateTransformer extends CSVTransformer
                     return $this->defaultValue;
                 }
 
+                if (is_string($value) && Carbon::hasRelativeKeywords($value)) {
+                    return $this->defaultValue;
+                }
+
                 $date = Carbon::parse($value);
             }
 

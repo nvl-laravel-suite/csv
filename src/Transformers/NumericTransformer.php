@@ -224,7 +224,7 @@ final class NumericTransformer extends CSVTransformer
                 return $this->defaultValue;
             }
 
-            $value = preg_replace('/[^0-9.-]/', '', (string) $value);
+            $value = preg_replace('/[^0-9.-]/', '', $this->normalizeDecimalComma((string) $value));
 
             if (! is_numeric($value)) {
                 return $this->defaultValue;
@@ -279,6 +279,25 @@ final class NumericTransformer extends CSVTransformer
         }
 
         return $result;
+    }
+
+    /**
+     * Read a comma as the decimal separator when it follows the last dot ("1.234,56")
+     * or is the only separator and does not group three digits ("1,5"); "1,234" stays grouped.
+     */
+    private function normalizeDecimalComma(string $value): string
+    {
+        $comma = strrpos($value, ',');
+        if ($comma === false) {
+            return $value;
+        }
+
+        $dot = strrpos($value, '.');
+        $decimalComma = $dot === false
+            ? substr_count($value, ',') === 1 && preg_match('/,\d{3}(?!\d)/', $value) !== 1
+            : $comma > $dot;
+
+        return $decimalComma ? str_replace(['.', ','], ['', '.'], $value) : $value;
     }
 
     /**

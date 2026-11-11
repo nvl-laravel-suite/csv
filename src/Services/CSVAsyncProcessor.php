@@ -18,8 +18,10 @@ use InvalidArgumentException;
 use Nvl\Csv\Enums\CSVDelimiterEnum;
 use Nvl\Csv\Enums\CSVDuplicateStrategyEnum;
 use Nvl\Csv\Enums\CSVEncodingEnum;
+use Nvl\Csv\Enums\CSVErrorLevelEnum;
 use Nvl\Csv\Enums\CSVProcessingModeEnum;
 use Nvl\Csv\Enums\CSVTypeEnum;
+use Nvl\Csv\Exceptions\CSVValidationException;
 use Nvl\Csv\Jobs\ProcessCSVChunkJob;
 use Nvl\Csv\Ownership\CSVBatchCallbacks;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
@@ -211,7 +213,8 @@ final class CSVAsyncProcessor
         $options = $this->options;
         $mappings = array_map(static fn (CSVFieldMapping $mapping): array => $mapping->toArray(), $this->fieldMappings);
         json_encode(['options' => $options, 'mappings' => $mappings], JSON_THROW_ON_ERROR);
-        $importer = (new CsvImporter)->withOptions($options)->fromFile($this->filePath ?? throw new OwnershipViolation)->stopOnError();
+        $importer = (new CsvImporter)->withOptions($options)->fromFile($this->filePath ?? throw new OwnershipViolation)
+            ->stopOnError()->withErrorThreshold(CSVErrorLevelEnum::WARNING);
         $chunks = [];
         $buffer = [];
         $index = 0;
@@ -225,6 +228,9 @@ final class CSVAsyncProcessor
             }
             if ($buffer !== []) {
                 $chunks[] = $this->writeChunk($work, $index, $buffer);
+            }
+            if ($chunks === []) {
+                throw new CSVValidationException('CSV source contains no data rows to queue.');
             }
             $checksum = $this->workStore->write($work, ['options' => $options, 'mappings' => $mappings, 'chunks' => $chunks]);
         } catch (Throwable $error) {

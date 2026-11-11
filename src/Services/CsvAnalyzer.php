@@ -28,6 +28,8 @@ final class CsvAnalyzer
 
     private const MAX_ANALYSIS_ROWS = 10000;
 
+    private const DETECTION_BYTES = 8192;
+
     /** @var resource|null */
     private $handle = null;
 
@@ -262,7 +264,7 @@ final class CsvAnalyzer
         }
 
         // Read first few KB for detection
-        $sample = fread($this->handle, 8192);
+        $sample = fread($this->handle, self::DETECTION_BYTES);
         if ($sample === false) {
             $sample = '';
         }
@@ -310,7 +312,15 @@ final class CsvAnalyzer
      */
     private function detectEncodingFromContent(string $sample): CSVEncodingEnum
     {
-        // Try mb_detect_encoding
+        // A full-size sample can end inside a multibyte UTF-8 character.
+        if (strlen($sample) === self::DETECTION_BYTES && ! mb_check_encoding($sample, 'UTF-8')) {
+            foreach ([1, 2, 3] as $partialBytes) {
+                if (mb_check_encoding(substr($sample, 0, -$partialBytes), 'UTF-8')) {
+                    return CSVEncodingEnum::UTF8;
+                }
+            }
+        }
+
         $detected = mb_detect_encoding($sample, [
             'UTF-8',
             'ISO-8859-1',
@@ -577,7 +587,7 @@ final class CsvAnalyzer
 
         foreach ($this->headers as $index => $header) {
             $columnValues = array_column($this->sampleData, $index);
-            $columnValues = array_filter($columnValues, fn ($v) => $v !== '' && $v !== null);
+            $columnValues = array_values(array_filter($columnValues, fn ($v) => $v !== '' && $v !== null));
 
             if (empty($columnValues)) {
                 $this->columnAnalysis[$header] = [
@@ -594,7 +604,7 @@ final class CsvAnalyzer
             $this->columnAnalysis[$header] = [
                 'type' => $type,
                 'nullable' => count($columnValues) < count($this->sampleData),
-                'sample' => $columnValues[0] ?? null,
+                'sample' => $columnValues[0],
             ];
 
             // Calculate statistics based on type

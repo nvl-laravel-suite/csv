@@ -252,9 +252,11 @@ final class CsvImporter
         self::intOption($options, 'skip_rows', 0);
         self::intOption($options, 'limit_rows', null);
         self::boolOption($options, 'validate_data', true);
-        if (array_key_exists('file_path', $options)) {
-            self::stringOption($options, 'file_path', '');
+        $source = $options['file_path'] ?? null;
+        if ($source !== null && ! is_string($source)) {
+            throw new CSVConfigurationException('CSV option [file_path] must be a string.');
         }
+        unset($options['file_path']);
         $this->configuration = new CSVConfiguration(
             delimiter: $delimiter,
             enclosure: self::stringOption($options, 'enclosure', $this->configuration->enclosure),
@@ -298,7 +300,10 @@ final class CsvImporter
             $this->mapField($source, $mapping->targetField, $mapping);
         }
 
-        $this->options = $options;
+        $this->options = $options + array_intersect_key($this->options, ['file_path' => true]);
+        if ($source !== null) {
+            $this->fromFile($source);
+        }
 
         return $this;
     }
@@ -1086,6 +1091,9 @@ final class CsvImporter
 
         $this->currentRow++;
         $this->assertValidUtf8($row, $this->currentRow);
+        if ($this->configuration->trimValues) {
+            $row = array_map(static fn (?string $value): ?string => $value === null ? null : trim($value), $row);
+        }
 
         // Check memory before processing
         if (! $this->memoryManager->canAllocate(1024)) {

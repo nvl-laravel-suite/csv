@@ -17,13 +17,13 @@ use Nvl\Csv\ValueObjects\CSVWorkReference;
  */
 final readonly class CSVBatchCallbacks
 {
-    /** Retain retryable failed chunks and remove only successfully completed temporary work.
+    /** Retain failed or cancelled chunks and remove only successfully completed temporary work.
      * @return Closure(Batch): void
      */
     public static function cleanup(CSVWorkReference $work): Closure
     {
         return static function (Batch $batch) use ($work): void {
-            if ($batch->failedJobs === 0) {
+            if ($batch->failedJobs === 0 && ! $batch->cancelled()) {
                 Container::getInstance()->make(CSVWorkStore::class)->delete($work);
             }
         };
