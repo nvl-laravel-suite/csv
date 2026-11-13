@@ -5,9 +5,17 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+## [7.0.4] - 2026-11-13
+
 ### Fixed
 
 - Abort and roll back a transactional CSV import on PostgreSQL serialization failures or deadlocks. Preserve the original database exception so an enclosing Laravel transaction can retry.
+
+<!-- NVL GENERATED CHANGES START -->
+### Changed
+
+- correct permission caches, transaction outcomes and migration diagnostics
+<!-- NVL GENERATED CHANGES END -->
 
 ## [7.0.3] - 2026-11-13
 
