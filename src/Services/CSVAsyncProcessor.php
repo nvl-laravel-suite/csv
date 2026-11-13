@@ -151,8 +151,13 @@ final class CSVAsyncProcessor
         if ($source !== null && ! is_string($source)) {
             throw new InvalidArgumentException('CSV source connection must be a configured connection name.');
         }
+        $queueConnectionName = PackageOptions::queueConnection('csv');
+        $queueDbConnection = config("queue.connections.{$queueConnectionName}.driver") === 'database'
+            ? config("queue.connections.{$queueConnectionName}.connection")
+            : false;
         if (DB::connection($source)->transactionLevel() !== 0
-            || ($this->batches instanceof DatabaseBatchRepository && $this->batches->getConnection()->transactionLevel() !== 0)) {
+            || ($this->batches instanceof DatabaseBatchRepository && $this->batches->getConnection()->transactionLevel() !== 0)
+            || ($queueDbConnection !== false && (is_string($queueDbConnection) || $queueDbConnection === null) && DB::connection($queueDbConnection)->transactionLevel() !== 0)) {
             throw new DomainException('Queued CSV production must start outside existing source and batch database transactions.');
         }
         $snapshot = $this->ownership->current()->snapshot();

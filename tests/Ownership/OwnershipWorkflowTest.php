@@ -21,11 +21,12 @@ use Nvl\Ownership\Services\OwnershipQueueContext;
 use Nvl\Ownership\Services\OwnershipRunner;
 use Nvl\Ownership\Tests\Fixtures\Actor;
 use Nvl\Ownership\Tests\Fixtures\Company;
+use Nvl\Ownership\Tests\Fixtures\OptsIntoAdoptedSchemaReuse;
 use Nvl\Support\Ownership\Contracts\OwnershipContext;
 use Nvl\Support\Ownership\Exceptions\OwnershipViolation;
 use Nvl\Support\Ownership\ValueObjects\OwnershipJobEnvelope;
 
-uses(OwnerScopeTestCase::class);
+uses(OwnerScopeTestCase::class, OptsIntoAdoptedSchemaReuse::class);
 
 it('rechecks owner admission after waiting for the configured chunk lock', function (): void {
     $path = tempnam(sys_get_temp_dir(), 'nvl_csv_');

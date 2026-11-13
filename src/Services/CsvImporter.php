@@ -10,6 +10,8 @@ use DivisionByZeroError;
 use Error;
 use Exception;
 use Generator;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
 use Nvl\Csv\Contracts\CSVRowHandler;
@@ -1303,6 +1305,7 @@ final class CsvImporter
             $e instanceof CSVValidationException => CSVErrorLevelEnum::ERROR,
             $e instanceof CSVMemoryException => CSVErrorLevelEnum::CRITICAL,
             $e instanceof InvalidArgumentException => CSVErrorLevelEnum::ERROR,
+            $e instanceof QueryException => CSVErrorLevelEnum::ERROR,
             default => CSVErrorLevelEnum::WARNING,
         };
 
@@ -1426,7 +1429,10 @@ final class CsvImporter
 
             try {
                 $processedRows++;
-                $processedRow = $this->processRowData($row);
+                $database = DB::connection($this->transactionConnection);
+                $processedRow = $database->transactionLevel() > 0
+                    ? $database->transaction(fn (): ?array => $this->processRowData($row))
+                    : $this->processRowData($row);
                 if ($processedRow === null) {
                     $this->skippedRows++;
 

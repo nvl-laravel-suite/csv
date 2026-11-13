@@ -2,9 +2,11 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Enums\CSVDuplicateStrategyEnum;
 use Nvl\Csv\Enums\CSVEncodingEnum;
@@ -563,4 +565,41 @@ it('rejects missing files, empty inputs, and missing required headers', function
         ->mapField('email', 'email', CSVFieldMapping::typed('email', 'email', CSVTypeEnum::EMAIL, true))
         ->run())
         ->toThrow(CSVValidationException::class);
+});
+
+it('isolates per-row database constraint errors with savepoints and stops when stopOnError is enabled', function (): void {
+    Schema::dropIfExists('csv_unique_rows');
+    Schema::create('csv_unique_rows', function (Blueprint $table): void {
+        $table->id();
+        $table->string('email')->unique();
+    });
+
+    try {
+        $path = $this->temporaryCsv("email\nada@example.test\nada@example.test\nbob@example.test\n");
+
+        $result = CsvImporter::make()
+            ->fromFile($path)
+            ->processRow(function (array $row): array {
+                DB::table('csv_unique_rows')->insert(['email' => $row['email']]);
+
+                return $row;
+            })
+            ->run();
+
+        expect($result['successful_rows'])->toBe(2)
+            ->and($result['failed_rows'])->toBe(1)
+            ->and(DB::table('csv_unique_rows')->count())->toBe(0);
+
+        expect(fn () => CsvImporter::make()
+            ->fromFile($path)
+            ->stopOnError(true)
+            ->processRow(function (array $row): array {
+                DB::table('csv_unique_rows')->insert(['email' => $row['email']]);
+
+                return $row;
+            })
+            ->run())->toThrow(QueryException::class);
+    } finally {
+        Schema::dropIfExists('csv_unique_rows');
+    }
 });

@@ -117,3 +117,25 @@ it('does not mistake an unrelated default transaction for the selected source ro
         DB::rollBack();
     }
 });
+
+it('refuses an open database-queue connection transaction before staging chunk files', function (): void {
+    $source = 'csv-clean-source';
+    $queueDb = 'csv-queue-db';
+    config()->set('database.connections.'.$source, ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+    config()->set('database.connections.'.$queueDb, ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+    config()->set('queue.default', 'database');
+    config()->set('queue.connections.database', ['driver' => 'database', 'connection' => $queueDb, 'table' => 'jobs', 'queue' => 'default', 'retry_after' => 90]);
+    config()->set('queue.batching.database', $source);
+    csvProducerBatchSchema($source);
+
+    $path = $this->temporaryCsv("name\nAda\n");
+    DB::connection($queueDb)->beginTransaction();
+    try {
+        expect(fn () => app(CSVAsyncProcessor::class)->fromFile($path)->withOptions(['connection' => $source])->usingHandler('committed-probe')->processAsync())
+            ->toThrow(DomainException::class, 'outside existing source and batch database transactions');
+    } finally {
+        DB::connection($queueDb)->rollBack();
+    }
+
+    expect(Storage::disk('local')->allFiles())->toBe([]);
+});

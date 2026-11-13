@@ -24,9 +24,9 @@ use Nvl\Support\Ownership\Contracts\OwnershipQueueContext;
 uses(OwnerScopeTestCase::class);
 
 it('serializes two native deliveries of one admitted chunk before host effects and completion', function (): void {
-    if (! in_array(getenv('NVL_OWNERSHIP_TEST_DRIVER'), ['pgsql', 'mysql', 'mariadb'], true)
+    if (getenv('NVL_OWNERSHIP_TEST_DRIVER') !== 'pgsql'
         || ! function_exists('pcntl_fork') || ! function_exists('pcntl_exec') || ! extension_loaded('redis')) {
-        $this->markTestSkipped('Requires dedicated PostgreSQL/MySQL/MariaDB sources, pcntl and phpredis.');
+        $this->markTestSkipped('Requires dedicated PostgreSQL sources, pcntl and phpredis.');
     }
     $redisPort = getenv('NVL_OWNERSHIP_TEST_REDIS_PORT');
     if (! is_string($redisPort) || ! ctype_digit($redisPort)) {

@@ -8,8 +8,6 @@ use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Providers\CsvServiceProvider;
 use Nvl\Csv\Services\CSVHandlerRegistry;
 use Nvl\Csv\Tests\Fixtures\OwnershipRowHandler;
-use Nvl\Ownership\Tests\Fixtures\Queue\QueueScenario;
-use Nvl\Ownership\Tests\Fixtures\Resources\ResourceScenario;
 use Nvl\Ownership\Tests\OwnershipTestCase;
 
 /** Tests captured private CSV work alongside unrelated owned resources without Tenancy. */
@@ -30,8 +28,7 @@ abstract class OwnerScopeTestCase extends OwnershipTestCase
     {
         parent::setUp();
         $this->allowOwners();
-        ResourceScenario::install($this->app);
-        QueueScenario::install();
+        $this->installResourceScenario(queue: true);
         Storage::fake('local');
         $this->app->make(CSVHandlerRegistry::class)->register('ownership-rows', OwnershipRowHandler::class);
     }

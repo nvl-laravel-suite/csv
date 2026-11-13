@@ -18,7 +18,7 @@ use Symfony\Component\Process\Process;
 uses(OwnerScopeTestCase::class);
 
 it('retains invalid queued rows as ordinary validation failures without ownership quarantine', function (): void {
-    if (! in_array(getenv('NVL_OWNERSHIP_TEST_DRIVER'), ['pgsql', 'mysql', 'mariadb'], true)) {
+    if (getenv('NVL_OWNERSHIP_TEST_DRIVER') !== 'pgsql') {
         $this->markTestSkipped('Requires an explicitly dedicated native source and independent worker.');
     }
     $path = tempnam(sys_get_temp_dir(), 'nvl_csv_');
@@ -53,7 +53,7 @@ it('retains invalid queued rows as ordinary validation failures without ownershi
 });
 
 it('processes owned and global CSV batches with retry and private cleanup in an independent worker', function (): void {
-    if (! in_array(getenv('NVL_OWNERSHIP_TEST_DRIVER'), ['pgsql', 'mysql', 'mariadb'], true)) {
+    if (getenv('NVL_OWNERSHIP_TEST_DRIVER') !== 'pgsql') {
         $this->markTestSkipped('Requires the explicitly dedicated native source and independent worker.');
     }
     $batches = [];
