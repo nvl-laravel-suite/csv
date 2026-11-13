@@ -603,3 +603,60 @@ it('isolates per-row database constraint errors with savepoints and stops when s
         Schema::dropIfExists('csv_unique_rows');
     }
 });
+
+it('propagates a PostgreSQL serialization failure and rolls back the import', function (bool $stopOnError): void {
+    if (DB::connection()->getDriverName() !== 'pgsql') {
+        $this->markTestSkipped('Requires PostgreSQL transaction errors.');
+    }
+
+    DB::statement('create temporary table csv_serialization_rows (name text)');
+    $path = $this->temporaryCsv("name\nAda\nBob\nCharlie\n");
+    $attempted = [];
+    $import = CsvImporter::make()->fromFile($path)->stopOnError($stopOnError)
+        ->processRow(function (array $row) use (&$attempted): array {
+            $attempted[] = $row['name'];
+            if ($row['name'] === 'Bob') {
+                DB::statement(<<<'SQL'
+                    DO $csv$ BEGIN RAISE EXCEPTION 'CSV serialization failure' USING ERRCODE = '40001'; END $csv$
+                    SQL);
+            }
+            DB::table('csv_serialization_rows')->insert($row);
+
+            return $row;
+        });
+
+    expect($import->run(...))->toThrow(QueryException::class, 'SQLSTATE[40001]')
+        ->and($attempted)->toBe(['Ada', 'Bob'])
+        ->and(DB::connection()->transactionLevel())->toBe(0)
+        ->and(DB::table('csv_serialization_rows')->count())->toBe(0);
+})->with(['continue after row errors' => false, 'stop on row errors' => true]);
+
+it('lets a host transaction retry a PostgreSQL serialization failure from the import', function (): void {
+    if (DB::connection()->getDriverName() !== 'pgsql') {
+        $this->markTestSkipped('Requires PostgreSQL transaction errors.');
+    }
+
+    DB::statement('create temporary table csv_retry_rows (name text)');
+    $path = $this->temporaryCsv("name\nAda\nBob\n");
+    $attempts = 0;
+
+    DB::transaction(function () use ($path, &$attempts): void {
+        $attempts++;
+        DB::table('csv_retry_rows')->insert(['name' => 'Host']);
+        CsvImporter::make()->fromFile($path)
+            ->processRow(function (array $row) use ($attempts): array {
+                if ($attempts === 1 && $row['name'] === 'Bob') {
+                    DB::statement(<<<'SQL'
+                        DO $csv$ BEGIN RAISE EXCEPTION 'CSV serialization failure' USING ERRCODE = '40001'; END $csv$
+                        SQL);
+                }
+                DB::table('csv_retry_rows')->insert($row);
+
+                return $row;
+            })->run();
+    }, attempts: 2);
+
+    expect($attempts)->toBe(2)
+        ->and(DB::connection()->transactionLevel())->toBe(0)
+        ->and(DB::table('csv_retry_rows')->orderBy('name')->pluck('name')->all())->toBe(['Ada', 'Bob', 'Host']);
+});

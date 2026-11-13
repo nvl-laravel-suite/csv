@@ -10,6 +10,7 @@ use DivisionByZeroError;
 use Error;
 use Exception;
 use Generator;
+use Illuminate\Database\DeadlockException;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -1440,6 +1441,9 @@ final class CsvImporter
                 }
 
                 $this->successfulRows++;
+            } catch (DeadlockException $exception) {
+                // Laravel's nested transaction wrapper drops string SQLSTATE codes used for retries.
+                throw $exception->getPrevious() ?? $exception;
             } catch (Exception $e) {
                 $this->handleRowError($row, $e);
             }
