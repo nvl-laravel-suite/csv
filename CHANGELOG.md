@@ -5,9 +5,17 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+## [7.0.3] - 2026-11-13
+
 ### Fixed
 
 - Isolate row-import database errors in nested savepoints on PostgreSQL and verify source, batch, and database-queue connection transaction levels before enqueueing async CSV batches.
+
+<!-- NVL GENERATED CHANGES START -->
+### Changed
+
+- harden package runtime safety, PostgreSQL portability and test performance
+<!-- NVL GENERATED CHANGES END -->
 
 ## [7.0.2] - 2026-11-11
 
