@@ -5,6 +5,8 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+## [7.2.0] - 2026-11-17
+
 ### Added
 
 - `CSVTypeEnum::INSTANT` casts an offset-qualified value to UTC RFC 3339 with microseconds (`2026-03-29T00:30:00.123456Z`); values without an explicit offset or zone are rejected. `DATETIME` remains wall time and does not retain an offset.
@@ -32,6 +34,12 @@ All notable changes to `nvl/csv` are documented here.
 
 - A mapping `format` is accepted only for `DATE`, `DATETIME` and `INSTANT` mappings; other combinations throw `InvalidArgumentException`.
 - The staged work format is version 3; workers no longer re-apply mappings.
+
+<!-- NVL GENERATED CHANGES START -->
+### Changed
+
+- implement the Final spec audit for one release
+<!-- NVL GENERATED CHANGES END -->
 
 ## [7.1.0] - 2026-11-16
 
