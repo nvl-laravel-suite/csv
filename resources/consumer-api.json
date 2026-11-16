@@ -726,7 +726,8 @@
                 "make",
                 "path",
                 "stream",
-                "withOptions"
+                "withOptions",
+                "writeToResource"
             ],
             "properties": [],
             "constants": []

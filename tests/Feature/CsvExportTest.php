@@ -131,6 +131,47 @@ it('streams UTF-16 output as one consistently encoded file', function (): void {
         ->and($decoded)->toContain("Иван,София\n");
 });
 
+it('writes encoded rows to an open caller stream as the iterable advances', function (): void {
+    $destination = fopen('php://temp', 'w+b');
+    $options = ['encoding' => CSVEncodingEnum::UTF16_LE, 'fields' => ['label'], 'headings' => ['Name']];
+    $rows = (function () use ($destination): Generator {
+        yield ['label' => 'Иван'];
+        expect(ftell($destination))->toBeGreaterThan(2);
+        yield ['label' => '=1+1'];
+    })();
+
+    try {
+        $exporter = CsvExporter::make();
+        $result = $exporter->writeToResource($destination, $rows, $options);
+
+        expect($result)->toMatchArray(['row_count' => 2, 'column_count' => 1, 'errors' => [], 'warnings' => []])
+            ->and(is_resource($destination))->toBeTrue();
+        rewind($destination);
+        expect(stream_get_contents($destination))->toBe($exporter->export([['label' => 'Иван'], ['label' => '=1+1']], $options));
+    } finally {
+        fclose($destination);
+    }
+});
+
+it('leaves a failed caller stream open without retaining the export encoding filter', function (): void {
+    $destination = fopen('php://temp', 'w+b');
+    $rows = (function (): Generator {
+        yield ['label' => 'First'];
+
+        throw new RuntimeException('Source interrupted');
+    })();
+
+    try {
+        expect(fn () => CsvExporter::make()->writeToResource($destination, $rows, ['encoding' => CSVEncodingEnum::UTF16_LE]))
+            ->toThrow(RuntimeException::class, 'Source interrupted');
+        expect(fwrite($destination, 'plain'))->toBe(5);
+        rewind($destination);
+        expect(stream_get_contents($destination))->toEndWith('plain');
+    } finally {
+        fclose($destination);
+    }
+});
+
 it('exports collections and callback-provided streams', function (): void {
     $collectionResult = CsvExporter::make()
         ->disk('csv-exports')

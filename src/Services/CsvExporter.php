@@ -35,6 +35,16 @@ use Throwable;
  * @throws RuntimeException
  *
  * @api
+ *
+ * @phpstan-type ExportStatistics array{
+ *     row_count:int, column_count:int, processing_time:float, metadata:array<string,mixed>,
+ *     errors:list<string>, warnings:list<string>
+ * }
+ * @phpstan-type DiskExportResult array{
+ *     path:string, storage_path:string, url:string|null, file_size:int, disk:string,
+ *     row_count:int, column_count:int, processing_time:float, metadata:array<string,mixed>,
+ *     errors:list<string>, warnings:list<string>
+ * }
  */
 final class CsvExporter
 {
@@ -120,6 +130,41 @@ final class CsvExporter
         } finally {
             $this->closeFile();
         }
+    }
+
+    /**
+     * Encode rows directly to a writable output stream without closing or rewinding it.
+     * A later row or write failure can leave a valid prefix in the caller's stream.
+     *
+     * @param  mixed  $destination  Open writable stream resource
+     * @param  iterable<array-key, array<string, mixed>|Model>  $rows
+     * @param  array<string, mixed>  $options
+     * @return ExportStatistics
+     */
+    public function writeToResource(mixed $destination, iterable $rows, array $options = []): array
+    {
+        if (! is_resource($destination) || get_resource_type($destination) !== 'stream'
+            || strpbrk(stream_get_meta_data($destination)['mode'], 'waxc+') === false) {
+            throw new CSVConfigurationException('CSV export requires an open writable stream resource.');
+        }
+
+        $this->withOptions(['filename' => 'export.csv', ...$options]);
+        $this->validateConfiguration();
+        $this->handle = $destination;
+        $filter = null;
+        try {
+            $filter = $this->prepareOutputEncoding($destination);
+            $this->writeHeaders();
+            $this->writeCollectionData($rows);
+        } finally {
+            $this->handle = null;
+            $encoded = $filter === null || stream_filter_remove($filter);
+        }
+        if (! $encoded || ! fflush($destination)) {
+            throw new RuntimeException('Unable to flush CSV output.');
+        }
+
+        return $this->statistics();
     }
 
     /**
@@ -438,7 +483,7 @@ final class CsvExporter
      * Supports both chunked and standard processing modes.
      *
      * @param  list<array<string, mixed>>  $data  Array of data rows to export
-     * @return array<string, mixed> Export result with file information and statistics
+     * @return DiskExportResult Export result with file information and statistics
      *
      * @throws RuntimeException If file operations fail or system resources are unavailable
      * @throws CSVConfigurationException If export configuration is invalid or incomplete
@@ -478,7 +523,7 @@ final class CsvExporter
      * @template TModel of Model
      *
      * @param  Builder<TModel>  $query  Eloquent query builder instance
-     * @return array<string, mixed> Export result with file information and statistics
+     * @return DiskExportResult Export result with file information and statistics
      *
      * @throws RuntimeException If file operations fail or database query fails
      * @throws CSVConfigurationException If export configuration is invalid or incomplete
@@ -516,7 +561,7 @@ final class CsvExporter
      * Supports collections of models, arrays, or other serializable data.
      *
      * @param  Collection<array-key, mixed>  $collection  Data to export
-     * @return array<string, mixed> Export result with file information and statistics
+     * @return DiskExportResult Export result with file information and statistics
      *
      * @throws RuntimeException If file operations fail or collection conversion fails
      * @throws CSVConfigurationException If export configuration is invalid or incomplete
@@ -550,7 +595,7 @@ final class CsvExporter
      * @throws RuntimeException If file operations fail or data provider callback fails
      * @throws CSVConfigurationException If export configuration is invalid or incomplete
      */
-    /** @return array<string,mixed> */
+    /** @return DiskExportResult */
     public function stream(Closure $dataProvider): array
     {
         $this->validateConfiguration();
@@ -674,14 +719,7 @@ final class CsvExporter
         if ($this->handle !== null) {
             $this->columnCount = count($headings);
             $headerValues = array_map(fn (string $heading): string => $this->applyFormulaPolicy($heading), $headings);
-            fputcsv(
-                $this->handle,
-                $headerValues,
-                $this->configuration->delimiter,
-                $this->configuration->enclosure,
-                $this->configuration->escape,
-                $this->configuration->lineEnding,
-            );
+            $this->putCsv($this->handle, $headerValues);
             $this->headersWritten = true;
         }
     }
@@ -824,14 +862,25 @@ final class CsvExporter
         }
 
         if ($this->handle !== null) {
-            fputcsv(
-                $this->handle,
-                $csvRow,
-                $this->configuration->delimiter,
-                $this->configuration->enclosure,
-                $this->configuration->escape,
-                $this->configuration->lineEnding,
-            );
+            $this->putCsv($this->handle, $csvRow);
+        }
+    }
+
+    /**
+     * @param  resource  $handle
+     * @param  list<int|string>  $values
+     */
+    private function putCsv(mixed $handle, array $values): void
+    {
+        if (fputcsv(
+            $handle,
+            $values,
+            $this->configuration->delimiter,
+            $this->configuration->enclosure,
+            $this->configuration->escape,
+            $this->configuration->lineEnding,
+        ) === false) {
+            throw new RuntimeException('Unable to write CSV output.');
         }
     }
 
@@ -895,9 +944,34 @@ final class CsvExporter
             throw new RuntimeException('Unable to open encoded CSV output stream.');
         }
 
+        try {
+            $filter = $this->prepareOutputEncoding($output);
+            if (stream_copy_to_stream($this->handle, $output) === false
+                || ($filter !== null && ! stream_filter_remove($filter))) {
+                throw new RuntimeException('Unable to encode CSV output.');
+            }
+            rewind($output);
+
+            return $output;
+        } catch (Throwable $exception) {
+            fclose($output);
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * Send an optional BOM and attach the same conversion for file and caller-owned streams.
+     *
+     * @param  resource  $output
+     * @return resource|null
+     */
+    private function prepareOutputEncoding(mixed $output)
+    {
         $encoding = $this->configuration->encoding ?? 'UTF-8';
-        if ($this->configuration->includeBOM) {
-            fwrite($output, $this->bomForEncoding($encoding));
+        $bom = $this->configuration->includeBOM ? $this->bomForEncoding($encoding) : '';
+        if ($bom !== '' && fwrite($output, $bom) !== strlen($bom)) {
+            throw new RuntimeException('Unable to write the CSV output byte order mark.');
         }
 
         $filterEncoding = match (strtoupper(str_replace('_', '-', $encoding))) {
@@ -905,28 +979,15 @@ final class CsvExporter
             'UTF-32' => 'UTF-32BE',
             default => $encoding,
         };
-        $filter = null;
-
-        if (strcasecmp($filterEncoding, 'UTF-8') !== 0) {
-            $filter = stream_filter_append(
-                $output,
-                "convert.iconv.UTF-8/{$filterEncoding}",
-                STREAM_FILTER_WRITE
-            );
-
-            if ($filter === false) {
-                fclose($output);
-                throw new RuntimeException("Unable to encode CSV output as {$encoding}.");
-            }
+        if (strcasecmp($filterEncoding, 'UTF-8') === 0) {
+            return null;
+        }
+        $filter = stream_filter_append($output, "convert.iconv.UTF-8/{$filterEncoding}", STREAM_FILTER_WRITE);
+        if ($filter === false) {
+            throw new RuntimeException("Unable to encode CSV output as {$encoding}.");
         }
 
-        stream_copy_to_stream($this->handle, $output);
-        if (is_resource($filter)) {
-            stream_filter_remove($filter);
-        }
-        rewind($output);
-
-        return $output;
+        return $filter;
     }
 
     /**
@@ -981,27 +1042,27 @@ final class CsvExporter
      * information about the export operation.
      *
      * @param  array{path: string, storage_path: string, url: string|null, file_size: int}  $fileData
-     * @return array<string, mixed> Complete export result with statistics and file information
+     * @return DiskExportResult Complete export result with statistics and file information
      */
     private function createResult(array $fileData): array
     {
-        $processingTime = microtime(true) - $this->startTime;
-        $diskName = $this->resolveDiskName();
-        $metadata = $this->options['metadata'] ?? null;
-        $optionMetadata = is_array($metadata) ? $metadata : [];
+        $statistics = $this->statistics();
+        $statistics['metadata']['storage_path'] = $fileData['storage_path'];
 
-        return array_merge($fileData, [
+        return [...$fileData, ...$statistics, 'disk' => $this->resolveDiskName()];
+    }
+
+    /** @return ExportStatistics */
+    private function statistics(): array
+    {
+        return [
             'row_count' => $this->rowCount,
             'column_count' => $this->columnCount,
-            'file_size' => $fileData['file_size'],
-            'processing_time' => $processingTime,
-            'disk' => $diskName,
-            'metadata' => array_merge($optionMetadata, [
-                'storage_path' => $fileData['storage_path'],
-            ]),
-            'errors' => $this->errors,
-            'warnings' => $this->warnings,
-        ]);
+            'processing_time' => microtime(true) - $this->startTime,
+            'metadata' => self::arrayOption($this->options, 'metadata'),
+            'errors' => array_values($this->errors),
+            'warnings' => array_values($this->warnings),
+        ];
     }
 
     private function resolveDiskName(): string

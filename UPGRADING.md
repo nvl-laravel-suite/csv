@@ -14,6 +14,8 @@ Upgrade CSV and its selected NVL dependency closure together to the native `^7.0
 
 Drain or cancel old CSV jobs and staged manifests before deploying the native worker. They contain retired callback or Tenancy payloads and cannot be restored through the new work reference. Register versioned `CSVRowHandler` classes through `CSVHandlerRegistry` at application boot and enqueue by alias with `CSVAsyncProcessor::usingHandler()`. Queued consumer closures, callback-bearing field mappings, and arbitrary object options are refused.
 
+Move the body of a former `processRow()` closure into the registered handler's `process(array $row, int $rowNumber)` method. Use the batch ID from `processAsync()` with `getBatchStatus()` for progress and correlate Laravel's `BatchFinished` event for completion. Keep local callback workflows on `CsvImporter`.
+
 For queued options, pass enum instances or their exact backed strings for `encoding`, `processing_mode`, and `duplicate_strategy`. The manifest stores the backed strings. `CSVDelimiterEnum` normalizes to its delimiter character; `column_types` enum values normalize to backed strings. Other objects remain unsupported. Invalid enum strings fail before staging.
 
 Configure a shared private work disk, Laravel's queue batch repository, and workers with `retry_after` above the 360 second chunk lock lease (the job timeout is 300 seconds). Native Ownership captures and re-admits worker context; the retired `TenantContext`, `TenantRunner`, and legacy work-store fallback are removed. A null owner context is never an authority grant. The optional `nvl/ownership` integration must be configured explicitly. `CSVWorkReference` now carries a native Ownership envelope.

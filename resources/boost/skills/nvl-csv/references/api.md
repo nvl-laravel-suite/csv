@@ -1128,7 +1128,7 @@ public function __construct(Nvl\Csv\Services\CSVWorkStore $workStore, Illuminate
 public function cancelBatch(string $batchId): bool
 public function fromFile(string $path): self
 public function getBatchStatus(string $batchId): array
-@return array<string, mixed>
+@return (array{status: 'not_found'} | array{id: string, status: ('processing' | 'cancelled' | 'completed' | 'completed_with_failures'), processed_jobs: int, pending_jobs: int, failed_jobs: int, total_jobs: int})
 public static function make(): self
 public function mapField(string $source, string $target, ?Nvl\Csv\ValueObjects\CSVFieldMapping $mapping=null): self
 public function onBatchComplete(Closure $callback): never
@@ -1219,14 +1219,16 @@ resolved @return Nvl\Csv\Services\CsvExporter
 @throws Exception
 public function fromArray(array $data): array
 @param list<array<string, mixed>> $data
-@return array<string, mixed>
+@return DiskExportResult
+resolved @return array{path: string, storage_path: string, url: (string | null), file_size: int, disk: string, row_count: int, column_count: int, processing_time: float, metadata: array<string, mixed>, errors: list<string>, warnings: list<string>}
 @throws RuntimeException
 @throws CSVConfigurationException
 resolved @throws Nvl\Csv\Exceptions\CSVConfigurationException
 public function fromCollection(Illuminate\Support\Collection $collection): array
 @param Collection<array-key, mixed> $collection
 resolved @param Illuminate\Support\Collection<array-key, mixed> $collection
-@return array<string, mixed>
+@return DiskExportResult
+resolved @return array{path: string, storage_path: string, url: (string | null), file_size: int, disk: string, row_count: int, column_count: int, processing_time: float, metadata: array<string, mixed>, errors: list<string>, warnings: list<string>}
 @throws RuntimeException
 @throws CSVConfigurationException
 resolved @throws Nvl\Csv\Exceptions\CSVConfigurationException
@@ -1235,7 +1237,8 @@ public function fromQuery(Illuminate\Database\Eloquent\Builder $query): array
 resolved @template TModel of Illuminate\Database\Eloquent\Model
 @param Builder<TModel> $query
 resolved @param Illuminate\Database\Eloquent\Builder<TModel> $query
-@return array<string, mixed>
+@return DiskExportResult
+resolved @return array{path: string, storage_path: string, url: (string | null), file_size: int, disk: string, row_count: int, column_count: int, processing_time: float, metadata: array<string, mixed>, errors: list<string>, warnings: list<string>}
 @throws RuntimeException
 @throws CSVConfigurationException
 resolved @throws Nvl\Csv\Exceptions\CSVConfigurationException
@@ -1256,9 +1259,17 @@ public function path(string $path): self
 resolved @return Nvl\Csv\Services\CsvExporter
 @throws Exception
 public function stream(Closure $dataProvider): array
-@return array<string, mixed>
+@return DiskExportResult
+resolved @return array{path: string, storage_path: string, url: (string | null), file_size: int, disk: string, row_count: int, column_count: int, processing_time: float, metadata: array<string, mixed>, errors: list<string>, warnings: list<string>}
 public function withOptions(array $options): self
 @param array<string, mixed> $options
+public function writeToResource(mixed $destination, iterable $rows, array $options=[]): array
+@param mixed $destination
+@param iterable<array-key, (array<string, mixed> | Model)> $rows
+resolved @param iterable<array-key, (array<string, mixed> | Illuminate\Database\Eloquent\Model)> $rows
+@param array<string, mixed> $options
+@return ExportStatistics
+resolved @return array{row_count: int, column_count: int, processing_time: float, metadata: array<string, mixed>, errors: list<string>, warnings: list<string>}
 ```
 
 ## Nvl\Csv\Services\CsvImporter

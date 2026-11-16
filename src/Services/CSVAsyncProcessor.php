@@ -188,7 +188,14 @@ final class CSVAsyncProcessor
         });
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * Read the selected Laravel batch's status and job counts.
+     *
+     * @return array{status:'not_found'}|array{
+     *     id:string, status:'processing'|'cancelled'|'completed'|'completed_with_failures',
+     *     processed_jobs:int, pending_jobs:int, failed_jobs:int, total_jobs:int
+     * }
+     */
     public function getBatchStatus(string $batchId): array
     {
         $batch = Bus::findBatch($batchId);

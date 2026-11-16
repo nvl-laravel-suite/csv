@@ -11,8 +11,10 @@ use Nvl\Csv\Services\CSVAsyncProcessor;
 use Nvl\Csv\Services\CsvExporter;
 use Nvl\Csv\Services\CSVHandlerRegistry;
 use Nvl\Csv\Services\CsvImporter;
+use Nvl\Csv\Services\CsvQueueDoctor;
 use Nvl\Csv\Services\CSVWorkStore;
 use Nvl\Ownership\Services\OwnershipAdoptionRegistry;
+use Nvl\Support\Doctor\PackageDoctorContributor;
 use Nvl\Support\Globals\GlobalNames;
 use Nvl\Support\Ownership\Contracts\OwnershipIntegratedProvider;
 use Nvl\Support\Providers\SupportServiceProvider;
@@ -32,6 +34,7 @@ final class CsvServiceProvider extends ServiceProvider implements OwnershipInteg
         $this->app->bindIf(CSVAsyncProcessor::class);
         $this->app->bindIf(CSVWorkStore::class);
         $this->app->singleton(CSVHandlerRegistry::class);
+        PackageDoctorContributor::register($this->app, 'nvl/csv', fn (): array => $this->app->make(CsvQueueDoctor::class)->inspect());
         $this->app->booted(function (): void {
             if ($this->app->bound(OwnershipAdoptionRegistry::class)) {
                 $this->app->make(OwnershipAdoptionRegistry::class)->register('csv', CsvAdoptionAdapter::class);

@@ -43,6 +43,19 @@ Duplicate checks preserve strict value types across all configured unique fields
 
 The native `export()` entry point returns a PHP string, so its final encoded bytes must fit in memory. Before materializing that string, it checks the output size against the configured memory budget with room for a second copy and throws `CSVMemoryException` when the budget is insufficient. Use the disk-backed `fromArray()`, `fromQuery()`, `fromCollection()`, or `stream()` paths for large artifacts; those copy the encoded stream to Laravel storage without returning its full bytes.
 
+Use `writeToResource($destination, $rows, $options)` to write a lazy iterable to an open writable stream, such as `php://output` in a Laravel `streamDownload` callback. It applies the same dialect, encoding, BOM, headings, field order and formula policy as `export()`. The caller owns the stream and its position. If a later row or write fails, bytes already written remain in the stream.
+
+### Result arrays
+
+| Operation | Stable result keys |
+| --- | --- |
+| `CsvImporter::import()`, `run()`, `batch()` | `total_rows`, `processed_rows`, `successful_rows`, `failed_rows`, `skipped_rows`, `failed_rows_data`, `processing_time`, `started_at`, `completed_at`, `errors`, `warnings`, `metadata` |
+| `CsvExporter::writeToResource()` | `row_count`, `column_count`, `processing_time`, `errors`, `warnings`, `metadata` |
+| `CsvExporter` disk-backed operations | The resource export keys plus `disk`, `path`, `storage_path`, `url`, `file_size` |
+| `CSVAsyncProcessor::getBatchStatus()` | `status` alone when `not_found`, otherwise `id`, `status`, `processed_jobs`, `pending_jobs`, `failed_jobs`, `total_jobs` |
+
+Counts and file size are integers, file size is in bytes, and `processing_time` is seconds as a float. `errors` and `warnings` are lists of strings. Each retained import failure contains `row_number`, `data`, and `error`. Import timestamps are Carbon instances. Disk export `storage_path` is relative to its Laravel disk. `path` is the adapter path where available and `url` can be null. `metadata` carries host-supplied metadata and operation-specific keys. `processed_rows` counts successful and failed attempts. A transactional import can roll back recorded attempts after a failed row.
+
 ## Queued rows
 
 Register a stable host `CSVRowHandler` class with an alias and version at boot, then enqueue a readable local file:
@@ -69,6 +82,8 @@ Create Laravel's queue batch repository table and configure workers for the sele
 | `nvl-csv.work.disk` | `local` when the key is omitted; an explicit `null`, empty or non-string value is refused when work is enqueued or read |
 
 A configured queue or lock value that is empty or not a string throws `InvalidArgumentException` instead of falling back. Configure `nvl-csv.work.disk` to a private writable disk shared by producer and worker; a worker refuses work staged on a different disk than its own configuration names. Select a shared atomic cache for `nvl-csv.locks.store`; every worker must use the same durable lock store. Failure logging follows Core's `nvl-core.logging` settings. A process-local array cache cannot coordinate separate workers. Restart old workers when deploying this change.
+
+Register Core's `DoctorServiceProvider` and run `php artisan nvl:doctor`. The `nvl/csv` checks report the effective work disk, atomic lock store and retry timing without writing staging files. Verify separately that each producer and worker mounts the same private disk and uses the same cache backend. For SQS, confirm the broker visibility timeout exceeds the 360-second lock lease.
 
 `processAsync()` returns a real batch synchronously and must start outside transactions on both the selected import connection (`connection`, or the default) and the actual database batch repository connection. An ambient transaction is rejected before staging private work. Chunk jobs force after-commit delivery, including on the sync queue with `after_commit=false`, so handlers run after the batch metadata transaction commits. Non-database repositories retain their supported dispatch behavior; an unrelated database transaction does not replace these source boundaries.
 

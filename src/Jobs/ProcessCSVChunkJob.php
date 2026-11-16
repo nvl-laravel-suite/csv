@@ -36,9 +36,13 @@ final class ProcessCSVChunkJob implements OwnershipQueuedJob, ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    public const int TimeoutSeconds = 300;
+
+    public const int LockSeconds = 360;
+
     public int $tries = 3;
 
-    public int $timeout = 300;
+    public int $timeout = self::TimeoutSeconds;
 
     /** @var list<int> */
     public array $backoff = [1, 5, 15];
@@ -77,7 +81,7 @@ final class ProcessCSVChunkJob implements OwnershipQueuedJob, ShouldQueue
         $key = 'nvl:csv:chunk:'.hash('sha256', json_encode([
             $this->ownership->toArray(), $this->work->disk, $this->work->manifestPath, $this->chunkIndex,
         ], JSON_THROW_ON_ERROR));
-        $store->lock($key, 360)->block(5, function () use ($workStore, $handlers): void {
+        $store->lock($key, self::LockSeconds)->block(5, function () use ($workStore, $handlers): void {
             $this->processChunk($workStore, $handlers);
         });
     }
