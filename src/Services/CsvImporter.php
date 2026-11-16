@@ -28,6 +28,7 @@ use Nvl\Csv\Exceptions\CSVMemoryException;
 use Nvl\Csv\Exceptions\CSVParseException;
 use Nvl\Csv\Exceptions\CSVValidationException;
 use Nvl\Csv\Support\CSVMemoryManager;
+use Nvl\Csv\Support\CSVRecordReader;
 use Nvl\Csv\Support\CSVTransactionRunner;
 use Nvl\Csv\ValueObjects\CSVConfiguration;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
@@ -66,6 +67,8 @@ final class CsvImporter
 
     /** @var resource|null */
     private $handle = null;
+
+    private ?CSVRecordReader $reader = null;
 
     /** @var array<string, CSVFieldMapping> */
     private array $fieldMappings = [];
@@ -108,8 +111,6 @@ final class CsvImporter
 
     private CSVDuplicateStrategyEnum $duplicateStrategy = CSVDuplicateStrategyEnum::SKIP;
 
-    private CSVEncodingEnum $encoding = CSVEncodingEnum::UTF8;
-
     private float $startTime;
 
     private bool $stopOnError = false;
@@ -137,6 +138,7 @@ final class CsvImporter
     public function __construct(?CSVConfiguration $configuration = null)
     {
         $this->configuration = $configuration ?? CSVConfiguration::default();
+        self::inputEncoding($this->configuration);
         $this->memoryManager = new CSVMemoryManager;
         $this->transactions = new CSVTransactionRunner;
         $this->startTime = microtime(true);
@@ -196,6 +198,7 @@ final class CsvImporter
      */
     public function configure(CSVConfiguration $configuration): self
     {
+        self::inputEncoding($configuration);
         $this->configuration = $configuration;
 
         return $this;
@@ -271,15 +274,12 @@ final class CsvImporter
             chunkSize: self::intOption($options, 'chunk_size', $this->configuration->chunkSize),
             processingMode: $processingMode,
             exportFormat: $this->configuration->exportFormat,
-            encoding: $this->configuration->encoding,
+            encoding: $encoding !== null ? $encoding->value : $this->configuration->encoding,
             memoryLimit: self::intOption($options, 'memory_limit', $this->configuration->memoryLimit),
             strictMode: self::boolOption($options, 'strict_mode', $this->configuration->strictMode),
             skipEmptyRows: self::boolOption($options, 'skip_empty_rows', $this->configuration->skipEmptyRows),
             trimValues: self::boolOption($options, 'trim_values', $this->configuration->trimValues),
         );
-        if ($encoding !== null) {
-            $this->encoding = $encoding;
-        }
         if ($duplicateStrategy !== null) {
             $this->duplicateStrategy = $duplicateStrategy;
         }
@@ -562,7 +562,7 @@ final class CsvImporter
      */
     public function withEncoding(CSVEncodingEnum $encoding): self
     {
-        $this->encoding = $encoding;
+        $this->configuration = $this->configuration->withEncoding($encoding->value);
 
         return $this;
     }
@@ -641,7 +641,27 @@ final class CsvImporter
      */
     public function getEncoding(): CSVEncodingEnum
     {
-        return $this->encoding;
+        return self::inputEncoding($this->configuration);
+    }
+
+    /**
+     * Resolve the configuration's encoding name, the single source of the input encoding.
+     *
+     * @throws CSVConfigurationException When the name is not a supported input encoding
+     */
+    private static function inputEncoding(CSVConfiguration $configuration): CSVEncodingEnum
+    {
+        if ($configuration->encoding === null) {
+            return CSVEncodingEnum::UTF8;
+        }
+
+        foreach (CSVEncodingEnum::cases() as $encoding) {
+            if (strcasecmp($encoding->value, $configuration->encoding) === 0) {
+                return $encoding;
+            }
+        }
+
+        throw new CSVConfigurationException('CSV encoding is invalid.');
     }
 
     /**
@@ -726,13 +746,9 @@ final class CsvImporter
             $limitRows = $this->options['limit_rows'] ?? null;
             $processedRows = 0;
 
-            while (($row = $this->readNextRow()) !== false) {
+            while (($limitRows === null || $processedRows < $limitRows) && ($row = $this->readNextRow()) !== false) {
                 if ($this->currentRow <= $skipRows) {
                     continue;
-                }
-
-                if ($limitRows !== null && $processedRows >= $limitRows) {
-                    break;
                 }
 
                 if ($this->shouldSkipRow($row)) {
@@ -797,13 +813,9 @@ final class CsvImporter
             $batch = [];
             $batchNumber = 0;
 
-            while (($row = $this->readNextRow()) !== false) {
+            while (($limitRows === null || $processedRows < $limitRows) && ($row = $this->readNextRow()) !== false) {
                 if ($this->currentRow <= $skipRows) {
                     continue;
-                }
-
-                if ($limitRows !== null && $processedRows >= $limitRows) {
-                    break;
                 }
 
                 if ($this->shouldSkipRow($row)) {
@@ -815,19 +827,23 @@ final class CsvImporter
                 try {
                     $processedRows++;
                     $processedRow = $this->processRowData($row);
-                    if ($processedRow === null) {
-                        $this->skippedRows++;
-
-                        continue;
-                    }
-                    $batch[] = $processedRow;
-
-                    if (count($batch) >= $batchSize) {
-                        $this->processBatch($batch, $batchProcessor, ++$batchNumber);
-                        $batch = [];
-                    }
                 } catch (Exception $e) {
                     $this->handleRowError($row, $e);
+
+                    continue;
+                }
+
+                if ($processedRow === null) {
+                    $this->skippedRows++;
+
+                    continue;
+                }
+                $batch[] = $processedRow;
+
+                if (count($batch) >= $batchSize) {
+                    $completeBatch = $batch;
+                    $batch = [];
+                    $this->processBatch($completeBatch, $batchProcessor, ++$batchNumber);
                 }
             }
 
@@ -901,7 +917,7 @@ final class CsvImporter
         $prefix = fread($this->handle, 4);
         $prefix = $prefix === false ? '' : $prefix;
         $detectedEncoding = CSVEncodingEnum::detectFromBOM($prefix);
-        $sourceEncoding = $detectedEncoding ?? $this->encoding;
+        $sourceEncoding = $detectedEncoding ?? self::inputEncoding($this->configuration);
         $bomLength = $detectedEncoding === null ? 0 : strlen($detectedEncoding->getBOM());
 
         $metadata = stream_get_meta_data($this->handle);
@@ -933,6 +949,13 @@ final class CsvImporter
                 throw new RuntimeException("Unable to convert CSV input from {$phpEncoding} to UTF-8.");
             }
         }
+
+        $this->reader = new CSVRecordReader(
+            $handle,
+            $this->configuration->delimiter,
+            $this->configuration->enclosure,
+            $this->configuration->escape,
+        );
     }
 
     /**
@@ -964,6 +987,7 @@ final class CsvImporter
             fclose($this->handle);
         }
         $this->handle = null;
+        $this->reader = null;
     }
 
     /**
@@ -978,19 +1002,13 @@ final class CsvImporter
      */
     private function readHeaders(): void
     {
-        if (! is_resource($this->handle)) {
+        if ($this->reader === null) {
             throw new RuntimeException('File handle is not open');
         }
 
         if ($this->configuration->includeHeaders) {
             // Read first row as headers
-            $headers = fgetcsv(
-                $this->handle,
-                0,
-                $this->configuration->delimiter,
-                $this->configuration->enclosure,
-                $this->configuration->escape
-            );
+            $headers = $this->reader->read();
 
             if ($headers === false) {
                 throw CSVParseException::invalidHeaders();
@@ -1005,13 +1023,7 @@ final class CsvImporter
             // Ensure all headers are strings
             $this->headers = array_map(fn ($h) => (string) $h, $headers);
         } else {
-            $firstRow = fgetcsv(
-                $this->handle,
-                0,
-                $this->configuration->delimiter,
-                $this->configuration->enclosure,
-                $this->configuration->escape
-            );
+            $firstRow = $this->reader->read();
 
             if ($firstRow === false) {
                 throw CSVParseException::invalidHeaders();
@@ -1075,17 +1087,11 @@ final class CsvImporter
      */
     private function readNextRow(): array|false
     {
-        if (! is_resource($this->handle)) {
+        if ($this->reader === null) {
             return false;
         }
 
-        $row = $this->pendingRow ?? fgetcsv(
-            $this->handle,
-            0,
-            $this->configuration->delimiter,
-            $this->configuration->enclosure,
-            $this->configuration->escape
-        );
+        $row = $this->pendingRow ?? $this->reader->read();
         $this->pendingRow = null;
 
         if ($row === false) {
@@ -1187,8 +1193,7 @@ final class CsvImporter
                 $value = $rowData[$csvField] ?? $mapping->defaultValue;
 
                 if ($this->shouldValidateData() && ! $mapping->validate($value)) {
-                    $errors = $mapping->getValidationErrors($value);
-                    throw new CSVValidationException(implode(', ', $errors));
+                    throw CSVValidationException::mappingFailed($this->currentRow, $csvField, $mapping->getValidationErrors($value));
                 }
 
                 // Apply transformation
@@ -1413,13 +1418,9 @@ final class CsvImporter
         $limitRows = $this->options['limit_rows'] ?? null;
         $processedRows = 0;
 
-        while (($row = $this->readNextRow()) !== false) {
+        while (($limitRows === null || $processedRows < $limitRows) && ($row = $this->readNextRow()) !== false) {
             if ($this->currentRow <= $skipRows) {
                 continue;
-            }
-
-            if ($limitRows !== null && $processedRows >= $limitRows) {
-                break;
             }
 
             if ($this->shouldSkipRow($row)) {

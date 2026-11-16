@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Enums\CSVDuplicateStrategyEnum;
 use Nvl\Csv\Enums\CSVEncodingEnum;
 use Nvl\Csv\Enums\CSVProcessingModeEnum;
+use Nvl\Csv\Enums\CSVTypeEnum;
 use Nvl\Csv\Exceptions\CSVConfigurationException;
 use Nvl\Csv\Exceptions\CSVValidationException;
 use Nvl\Csv\Jobs\ProcessCSVChunkJob;
@@ -132,4 +133,72 @@ it('tracks and cancels fake batches through the public API', function (): void {
 it('validates asynchronous configuration before dispatch', function (): void {
     expect(fn () => app(CSVAsyncProcessor::class)->withChunkSize(0))->toThrow(InvalidArgumentException::class)
         ->and(fn () => app(CSVAsyncProcessor::class)->processAsync())->toThrow(InvalidArgumentException::class, 'source and registered handler');
+});
+
+it('enforces fluent mapping uniqueness across queued chunks', function (): void {
+    Bus::fake();
+    $path = $this->temporaryCsv("Email,Name\nada@example.test,Ada\nbob@example.test,Bob\nada@example.test,Ada Again\n");
+    $queue = fn (string $strategy, ?CSVFieldMapping $required = null): CSVAsyncProcessor => tap(
+        app(CSVAsyncProcessor::class)->fromFile($path)->withChunkSize(1)
+            ->withOptions(['duplicate_strategy' => $strategy])
+            ->mapField('Email', 'email', new CSVFieldMapping('Email', 'email', CSVTypeEnum::EMAIL, required: true, unique: true))
+            ->mapField('Name', 'name')
+            ->usingHandler('rows'),
+        static fn (CSVAsyncProcessor $processor) => $required === null ? null : $processor->mapField($required->sourceField, $required->targetField, $required),
+    );
+
+    expect(fn () => $queue('error')->processAsync())->toThrow(CSVValidationException::class, 'Duplicate value')
+        ->and(Storage::disk('local')->allFiles())->toBe([])
+        ->and(fn () => $queue('skip', new CSVFieldMapping('Phone', 'phone', required: true))->processAsync())
+        ->toThrow(CSVValidationException::class)
+        ->and(Storage::disk('local')->allFiles())->toBe([]);
+    Bus::assertNothingDispatched();
+
+    $queue('skip')->processAsync();
+    $manifestPath = collect(Storage::disk('local')->allFiles('ownership'))->first(static fn (string $file): bool => str_ends_with($file, '/manifest.json'));
+    $manifest = Storage::disk('local')->json($manifestPath);
+    $rows = collect($manifest['manifest']['chunks'])->flatMap(static fn (array $chunk): array => Storage::disk('local')->json($chunk['path']))->all();
+
+    expect($manifest['version'])->toBe(3)
+        ->and($rows)->toBe([
+            ['row_number' => 1, 'data' => ['email' => 'ada@example.test', 'name' => 'Ada']],
+            ['row_number' => 2, 'data' => ['email' => 'bob@example.test', 'name' => 'Bob']],
+        ]);
+});
+
+it('splits queued chunks by encoded byte budget', function (): void {
+    Bus::fake();
+    $payload = str_repeat('é', 3 * 512 * 1024);
+    $path = $this->temporaryCsv("id,payload\n1,{$payload}\n2,{$payload}\n3,{$payload}\n");
+
+    $batch = app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('rows')->processAsync();
+    $manifestPath = collect(Storage::disk('local')->allFiles('ownership'))->first(static fn (string $file): bool => str_ends_with($file, '/manifest.json'));
+    $chunks = Storage::disk('local')->json($manifestPath)['manifest']['chunks'];
+
+    expect($batch->totalJobs)->toBe(2)
+        ->and(array_column($chunks, 'rows'))->toBe([2, 1]);
+    foreach ($chunks as $chunk) {
+        $raw = Storage::disk('local')->get($chunk['path']);
+        expect(strlen($raw))->toBeLessThanOrEqual(8388608)
+            ->and(hash('sha256', $raw))->toBe($chunk['sha256'])
+            ->and(json_decode($raw, true)[0]['data']['payload'])->toBe($payload);
+    }
+});
+
+it('reports queued mapping failures with their source row and field', function (): void {
+    Bus::fake();
+    $path = $this->temporaryCsv("age\n42\nnot-an-integer\n");
+
+    try {
+        app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('rows')
+            ->mapField('age', 'years', CSVFieldMapping::typed('age', 'years', CSVTypeEnum::INTEGER))->processAsync();
+        $this->fail('Expected the queued mapping failure to surface from processAsync().');
+    } catch (CSVValidationException $exception) {
+        expect($exception->getMessage())->toBe("Field 'age' must be of type integer")
+            ->and($exception->getAffectedRows())->toBe([2])
+            ->and($exception->getRowErrors(2))->toBe(['age' => ["Field 'age' must be of type integer"]]);
+    }
+
+    expect(Storage::disk('local')->allFiles())->toBe([]);
+    Bus::assertNothingDispatched();
 });

@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Nvl\Csv\Enums\CSVTypeEnum;
 use Nvl\Csv\Exceptions\CSVValidationException;
 use Nvl\Csv\Services\CSVAsyncProcessor;
 use Nvl\Csv\Tests\OwnerScopeTestCase;
-use Nvl\Csv\ValueObjects\CSVFieldMapping;
 use Nvl\Ownership\Services\OwnershipRunner;
 use Nvl\Ownership\Tests\Fixtures\Actor;
 use Nvl\Ownership\Tests\Fixtures\Company;
@@ -22,10 +20,10 @@ it('retains invalid queued rows as ordinary validation failures without ownershi
         $this->markTestSkipped('Requires an explicitly dedicated native source and independent worker.');
     }
     $path = tempnam(sys_get_temp_dir(), 'nvl_csv_');
-    file_put_contents($path, "age\nnot-an-integer\n");
+    file_put_contents($path, "name\nInvalid row\n");
     try {
         $batch = app(OwnershipRunner::class)->run(Company::findOrFail(7), Actor::findOrFail(1), fn () => app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('ownership-rows')
-            ->mapField('age', 'years', CSVFieldMapping::typed('age', 'years', CSVTypeEnum::INTEGER))->processAsync());
+            ->processAsync());
         $queued = DB::table('jobs')->sole();
         $wire = json_decode($queued->payload, true, flags: JSON_THROW_ON_ERROR);
         $job = unserialize($wire['data']['command']);

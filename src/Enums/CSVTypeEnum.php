@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Nvl\Csv\Enums;
 
-use Carbon\Carbon;
 use DateTimeInterface;
 use Exception;
 use InvalidArgumentException;
+use Nvl\Csv\Support\CSVDateParser;
 use Stringable;
 
 /**
@@ -26,7 +26,8 @@ enum CSVTypeEnum: string
     case FLOAT = 'float';           // Decimal numbers
     case BOOLEAN = 'boolean';       // true/false, 1/0, yes/no variants
     case DATE = 'date';             // Date strings (Y-m-d format)
-    case DATETIME = 'datetime';     // DateTime strings with time component
+    case DATETIME = 'datetime';     // Wall-clock Y-m-d H:i:s; any offset is not retained
+    case INSTANT = 'instant';       // Offset-qualified instant as UTC RFC 3339 with microseconds
     case EMAIL = 'email';           // Email address validation
     case JSON = 'json';             // Valid JSON strings or encodable data
     case ARRAY = 'array';           // Array data or JSON-decodable strings
@@ -45,11 +46,12 @@ enum CSVTypeEnum: string
      * - Validates format compliance before conversion
      *
      * @param  mixed  $value  Raw input value from CSV
+     * @param  string|null  $format  Declared PHP date format for DATE, DATETIME and INSTANT
      * @return mixed Converted value in target PHP type
      *
      * @throws InvalidArgumentException When value cannot be converted to target type
      */
-    public function cast(mixed $value): mixed
+    public function cast(mixed $value, ?string $format = null): mixed
     {
         if ($value === null || $value === '') {
             if ($this->isNullable()) {
@@ -62,8 +64,9 @@ enum CSVTypeEnum: string
             self::INTEGER => $this->castToInteger($value),
             self::FLOAT => $this->castToFloat($value),
             self::BOOLEAN => $this->castToBoolean($value),
-            self::DATE => $this->castToDate($value),
-            self::DATETIME => $this->castToDateTime($value),
+            self::DATE => $this->castToDate($value, $format),
+            self::DATETIME => $this->castToDateTime($value, $format),
+            self::INSTANT => $this->castToInstant($value, $format),
             self::EMAIL => $this->castToEmail($value),
             self::JSON => $this->castToJson($value),
             self::ARRAY => $this->castToArray($value),
@@ -82,9 +85,10 @@ enum CSVTypeEnum: string
      * - Validates special formats (dates, JSON, etc.)
      *
      * @param  mixed  $value  Input value to validate
+     * @param  string|null  $format  Declared PHP date format for DATE, DATETIME and INSTANT
      * @return bool True if value is compatible with this type
      */
-    public function validate(mixed $value): bool
+    public function validate(mixed $value, ?string $format = null): bool
     {
         if ($value === null || $value === '') {
             return $this->isNullable();
@@ -95,10 +99,11 @@ enum CSVTypeEnum: string
             self::INTEGER, self::NULLABLE_INTEGER => $this->isValidInteger($value),
             self::FLOAT, self::NULLABLE_FLOAT => is_numeric($value) && is_finite((float) $value),
             self::BOOLEAN => $this->isValidBoolean($value),
-            self::DATE, self::DATETIME => $this->isValidDate($value),
+            self::DATE, self::DATETIME => $this->isValidDate($value, $format),
+            self::INSTANT => $this->isValidInstant($value, $format),
             self::EMAIL => $this->isValidEmail($value),
             self::JSON => is_string($value) ? $this->isValidJson($value) : $this->isJsonEncodable($value),
-            self::ARRAY => is_array($value) || $this->isValidJson($value),
+            self::ARRAY => is_array($value) || $this->isValidJson($value) || (is_string($value) && str_contains($value, ',')),
         };
     }
 
@@ -134,7 +139,7 @@ enum CSVTypeEnum: string
             self::INTEGER => 'int',
             self::FLOAT => 'float',
             self::BOOLEAN => 'bool',
-            self::DATE, self::DATETIME => 'string',
+            self::DATE, self::DATETIME, self::INSTANT => 'string',
             self::EMAIL => 'string',
             self::JSON => 'string',
             self::ARRAY => 'array',
@@ -165,7 +170,7 @@ enum CSVTypeEnum: string
             self::INTEGER => 0,
             self::FLOAT => 0.0,
             self::BOOLEAN => false,
-            self::DATE, self::DATETIME => null,
+            self::DATE, self::DATETIME, self::INSTANT => null,
             self::EMAIL => '',
             self::JSON => '{}',
             self::ARRAY => [],
@@ -206,6 +211,14 @@ enum CSVTypeEnum: string
     }
 
     /**
+     * Whether this type parses dates and therefore accepts a mapping format.
+     */
+    public function acceptsFormat(): bool
+    {
+        return in_array($this, [self::DATE, self::DATETIME, self::INSTANT], true);
+    }
+
+    /**
      * Parse and convert input to standardized date string format.
      *
      * Uses Carbon parser for flexible date format recognition.
@@ -216,10 +229,10 @@ enum CSVTypeEnum: string
      *
      * @throws InvalidArgumentException When input cannot be parsed as valid date
      */
-    private function castToDate(mixed $value): string
+    private function castToDate(mixed $value, ?string $format): string
     {
         try {
-            return $this->parseDate($value)->toDateString();
+            return CSVDateParser::parse($value, $format)->toDateString();
         } catch (Exception) {
             throw new InvalidArgumentException(
                 'Cannot parse '.$this->describeValue($value).' as date.',
@@ -228,25 +241,58 @@ enum CSVTypeEnum: string
     }
 
     /**
-     * Parse and convert input to standardized datetime string format.
+     * Parse and convert input to a wall-clock datetime string.
      *
-     * Uses Carbon parser for comprehensive datetime format support.
-     * Returns Y-m-d H:i:s format with time component preserved.
+     * Returns Y-m-d H:i:s as written. An offset in the input is not applied or retained;
+     * use INSTANT for offset-qualified points in time.
      *
      * @param  mixed  $value  Input value
      * @return string Formatted datetime string
      *
      * @throws InvalidArgumentException When input cannot be parsed as valid datetime
      */
-    private function castToDateTime(mixed $value): string
+    private function castToDateTime(mixed $value, ?string $format): string
     {
         try {
-            return $this->parseDate($value)->toDateTimeString();
+            return CSVDateParser::parse($value, $format)->toDateTimeString();
         } catch (Exception) {
             throw new InvalidArgumentException(
                 'Cannot parse '.$this->describeValue($value).' as datetime.',
             );
         }
+    }
+
+    /**
+     * Parse an offset-qualified instant and return it in UTC as RFC 3339 with microseconds.
+     *
+     * @throws InvalidArgumentException When input has no explicit offset or cannot be parsed
+     */
+    private function castToInstant(mixed $value, ?string $format): string
+    {
+        if (! $this->isValidInstant($value, $format)) {
+            throw new InvalidArgumentException(
+                'Cannot parse '.$this->describeValue($value).' as an offset-qualified instant.',
+            );
+        }
+
+        return CSVDateParser::parse($value, $format)->utc()->format('Y-m-d\TH:i:s.u\Z');
+    }
+
+    /**
+     * Validate a parseable value that states its offset or zone explicitly.
+     */
+    private function isValidInstant(mixed $value, ?string $format): bool
+    {
+        if (! $value instanceof DateTimeInterface) {
+            $hasOffset = $format !== null
+                ? preg_match('/(?<!\\\\)[eOPpTU]/', $format) === 1
+                : is_string($value) && array_key_exists('zone_type', date_parse($value));
+            if (! $hasOffset) {
+                return false;
+            }
+        }
+
+        return $this->isValidDate($value, $format);
     }
 
     /**
@@ -357,10 +403,10 @@ enum CSVTypeEnum: string
      * @param  mixed  $value  Input value
      * @return bool True when value can be parsed as a date
      */
-    private function isValidDate(mixed $value): bool
+    private function isValidDate(mixed $value, ?string $format = null): bool
     {
         try {
-            $this->parseDate($value);
+            CSVDateParser::parse($value, $format);
 
             return true;
         } catch (Exception) {
@@ -476,8 +522,16 @@ enum CSVTypeEnum: string
 
     private function castToFloat(mixed $value): float
     {
-        if (is_float($value) || is_int($value)) {
+        if (is_int($value)) {
             return (float) $value;
+        }
+
+        if (is_float($value)) {
+            if (! is_finite($value)) {
+                throw new InvalidArgumentException('Cannot cast a non-finite number to float.');
+            }
+
+            return $value;
         }
 
         if (! is_string($value) || ! is_numeric($value) || ! is_finite((float) $value)) {
@@ -496,32 +550,6 @@ enum CSVTypeEnum: string
         }
 
         return is_string($value) && filter_var($value, FILTER_VALIDATE_INT) !== false;
-    }
-
-    private function parseDate(mixed $value): Carbon
-    {
-        if (! is_string($value) && ! is_int($value) && ! is_float($value) && ! $value instanceof DateTimeInterface) {
-            throw new InvalidArgumentException('Date values must be strings, numbers, or DateTime instances.');
-        }
-
-        if ($value instanceof DateTimeInterface) {
-            return Carbon::instance($value);
-        }
-
-        if (is_string($value) && Carbon::hasRelativeKeywords($value)) {
-            throw new InvalidArgumentException('Date values must name a complete calendar date.');
-        }
-
-        $date = Carbon::parse($value);
-        $parseErrors = Carbon::getLastErrors();
-        if (
-            $parseErrors !== false
-            && ($parseErrors['warning_count'] > 0 || $parseErrors['error_count'] > 0)
-        ) {
-            throw new InvalidArgumentException('Date value contains invalid calendar components.');
-        }
-
-        return $date;
     }
 
     private function describeValue(mixed $value): string

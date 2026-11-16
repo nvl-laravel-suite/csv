@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Enums\CSVDelimiterEnum;
+use Nvl\Csv\Enums\CSVExportFormatEnum;
 use Nvl\Csv\Enums\CSVTypeEnum;
 use Nvl\Csv\Services\CsvAnalyzer;
 use Nvl\Csv\Services\CsvExporter;
@@ -70,3 +71,21 @@ it('supports a consumer analyze import export workflow through public APIs', fun
         ->and(Storage::disk('consumer-exports')->get('reports/people.csv'))
         ->toContain("42,\"Jane Doe\"\n");
 });
+
+it('round trips every export preset across multiple logical records', function (CSVExportFormatEnum $format): void {
+    Storage::fake('round-trip');
+    $rows = [
+        ['id' => '1', 'note' => "line one\nline two"],
+        ['id' => '2', 'note' => "carriage\rreturn, and comma"],
+        ['id' => '3', 'note' => 'say "hi"'],
+    ];
+    CsvExporter::make()->withOptions(['disk' => 'round-trip', 'path' => '', 'filename' => 'rows.csv', 'format' => $format])->fromArray($rows);
+    $path = $this->temporaryCsv(Storage::disk('round-trip')->get('rows.csv'));
+
+    $imported = iterator_to_array(CsvImporter::make()->fromFile($path)->withOptions(['delimiter' => $format->getDelimiter()])->stream(), false);
+    $analysis = (new CsvAnalyzer)->analyze($path);
+
+    expect($imported)->toBe($rows)
+        ->and($analysis['headers'])->toBe(['id', 'note'])
+        ->and($analysis['row_count'])->toBe(3);
+})->with(CSVExportFormatEnum::cases());

@@ -21,6 +21,7 @@ use Nvl\Csv\Enums\CSVEncodingEnum;
 use Nvl\Csv\Enums\CSVErrorLevelEnum;
 use Nvl\Csv\Enums\CSVProcessingModeEnum;
 use Nvl\Csv\Enums\CSVTypeEnum;
+use Nvl\Csv\Exceptions\CSVDispatchException;
 use Nvl\Csv\Exceptions\CSVValidationException;
 use Nvl\Csv\Jobs\ProcessCSVChunkJob;
 use Nvl\Csv\Ownership\CSVBatchCallbacks;
@@ -41,6 +42,9 @@ use Throwable;
  */
 final class CSVAsyncProcessor
 {
+    /** Encoded byte budget of one staged chunk file. */
+    private const int ChunkBytes = 8388608;
+
     private ?string $filePath = null;
 
     /** @var array<string,mixed> */
@@ -175,15 +179,23 @@ final class CSVAsyncProcessor
             foreach ($jobs as $job) {
                 $job->afterCommit();
             }
-            $batch = Bus::batch($jobs)->name('CSV Processing: '.$work->workId)->allowFailures()
-                ->finally(CSVBatchCallbacks::cleanup($work))
-                ->onConnection(PackageOptions::queueConnection('csv'))
-                ->onQueue(PackageOptions::queueName('csv'));
             try {
-                return $this->ownershipQueue->captureBatch($batch)->dispatch();
+                $batch = $this->ownershipQueue->captureBatch(
+                    Bus::batch($jobs)->name('CSV Processing: '.$work->workId)->allowFailures()
+                        ->finally(CSVBatchCallbacks::cleanup($work))
+                        ->onConnection(PackageOptions::queueConnection('csv'))
+                        ->onQueue(PackageOptions::queueName('csv')),
+                );
             } catch (Throwable $error) {
                 $this->workStore->delete($work);
                 throw $error;
+            }
+
+            // Once dispatch begins, a handler may already have run (for example on the sync queue).
+            try {
+                return $batch->dispatch();
+            } catch (Throwable $error) {
+                throw CSVDispatchException::afterDeliveryBegan($work, $error);
             }
         });
     }
@@ -226,16 +238,30 @@ final class CSVAsyncProcessor
         $mappings = array_map(static fn (CSVFieldMapping $mapping): array => $mapping->toArray(), $this->fieldMappings);
         json_encode(['options' => $options, 'mappings' => $mappings], JSON_THROW_ON_ERROR);
         $importer = (new CsvImporter)->withOptions($options)->fromFile($this->filePath ?? throw new OwnershipViolation)
+            ->mapFields($this->fieldMappings)
             ->stopOnError()->withErrorThreshold(CSVErrorLevelEnum::WARNING);
         $chunks = [];
         $buffer = [];
+        $bufferBytes = 2;
         $index = 0;
         try {
+            // Rows are staged after the full mapping pipeline: canonical, typed, unique and required-checked.
             foreach ($importer->stream() as $rowNumber => $row) {
-                $buffer[] = ['row_number' => $rowNumber, 'data' => $row];
+                $encoded = json_encode(['row_number' => $rowNumber, 'data' => $row], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                if (strlen($encoded) + 2 > self::ChunkBytes) {
+                    throw new OwnershipViolation('CSV row exceeds the private storage bound and cannot be staged.');
+                }
+                if ($buffer !== [] && $bufferBytes + 1 + strlen($encoded) > self::ChunkBytes) {
+                    $chunks[] = $this->writeChunk($work, $index++, $buffer);
+                    $buffer = [];
+                    $bufferBytes = 2;
+                }
+                $bufferBytes += ($buffer === [] ? 0 : 1) + strlen($encoded);
+                $buffer[] = $encoded;
                 if (count($buffer) >= $this->chunkSize) {
                     $chunks[] = $this->writeChunk($work, $index++, $buffer);
                     $buffer = [];
+                    $bufferBytes = 2;
                 }
             }
             if ($buffer !== []) {
@@ -253,14 +279,14 @@ final class CSVAsyncProcessor
         return array_map(static fn (array $chunk): ProcessCSVChunkJob => ProcessCSVChunkJob::fromOwnershipWork($work, $chunk['index'], $envelope, $checksum), $chunks);
     }
 
-    /** @param list<array{row_number:int,data:array<string,mixed>}> $rows
+    /** @param list<string> $rows JSON-encoded staged rows
      * @return array{index:int,path:string,sha256:string,rows:int}
      */
     private function writeChunk(CSVWorkReference $work, int $index, array $rows): array
     {
         $path = dirname($work->manifestPath).'/chunks/'.$index.'.json';
-        $payload = json_encode($rows, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        if (strlen($payload) > 8388608 || ! Storage::disk($work->disk)->put($path, $payload, ['visibility' => 'private'])) {
+        $payload = '['.implode(',', $rows).']';
+        if (strlen($payload) > self::ChunkBytes || ! Storage::disk($work->disk)->put($path, $payload, ['visibility' => 'private'])) {
             throw new OwnershipViolation('CSV chunk exceeds the private storage bound or cannot be staged.');
         }
 

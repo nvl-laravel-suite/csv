@@ -19,6 +19,7 @@ Search for the relevant fully qualified service or contract and read only its ma
 - `Nvl\Csv\Enums\CSVResponseCode`
 - `Nvl\Csv\Enums\CSVTypeEnum`
 - `Nvl\Csv\Exceptions\CSVConfigurationException`
+- `Nvl\Csv\Exceptions\CSVDispatchException`
 - `Nvl\Csv\Exceptions\CSVException`
 - `Nvl\Csv\Exceptions\CSVFileNotFoundException`
 - `Nvl\Csv\Exceptions\CSVMemoryException`
@@ -517,14 +518,17 @@ public const Nvl\Csv\Enums\CSVTypeEnum DATE=Nvl\Csv\Enums\CSVTypeEnum::DATE="dat
 public const Nvl\Csv\Enums\CSVTypeEnum DATETIME=Nvl\Csv\Enums\CSVTypeEnum::DATETIME="datetime"
 public const Nvl\Csv\Enums\CSVTypeEnum EMAIL=Nvl\Csv\Enums\CSVTypeEnum::EMAIL="email"
 public const Nvl\Csv\Enums\CSVTypeEnum FLOAT=Nvl\Csv\Enums\CSVTypeEnum::FLOAT="float"
+public const Nvl\Csv\Enums\CSVTypeEnum INSTANT=Nvl\Csv\Enums\CSVTypeEnum::INSTANT="instant"
 public const Nvl\Csv\Enums\CSVTypeEnum INTEGER=Nvl\Csv\Enums\CSVTypeEnum::INTEGER="integer"
 public const Nvl\Csv\Enums\CSVTypeEnum JSON=Nvl\Csv\Enums\CSVTypeEnum::JSON="json"
 public const Nvl\Csv\Enums\CSVTypeEnum NULLABLE_FLOAT=Nvl\Csv\Enums\CSVTypeEnum::NULLABLE_FLOAT="nullable_float"
 public const Nvl\Csv\Enums\CSVTypeEnum NULLABLE_INTEGER=Nvl\Csv\Enums\CSVTypeEnum::NULLABLE_INTEGER="nullable_integer"
 public const Nvl\Csv\Enums\CSVTypeEnum NULLABLE_STRING=Nvl\Csv\Enums\CSVTypeEnum::NULLABLE_STRING="nullable_string"
 public const Nvl\Csv\Enums\CSVTypeEnum STRING=Nvl\Csv\Enums\CSVTypeEnum::STRING="string"
-public function cast(mixed $value): mixed
+public function acceptsFormat(): bool
+public function cast(mixed $value, ?string $format=null): mixed
 @param mixed $value
+@param (string | null) $format
 @return mixed
 @throws InvalidArgumentException
 public function getDefaultValue(): mixed
@@ -533,8 +537,9 @@ public function getPhpType(): string
 @return string
 public function isNullable(): bool
 @return bool
-public function validate(mixed $value): bool
+public function validate(mixed $value, ?string $format=null): bool
 @param mixed $value
+@param (string | null) $format
 @return bool
 public readonly string $name
 public static function cases(): array
@@ -576,6 +581,36 @@ public function withContext(array $context): static
 @param array<string, mixed> $context
 @return static
 resolved @return Nvl\Csv\Exceptions\CSVConfigurationException
+```
+
+## Nvl\Csv\Exceptions\CSVDispatchException
+
+```text
+final class Nvl\Csv\Exceptions\CSVDispatchException extends Nvl\Csv\Exceptions\CSVException
+public static function afterDeliveryBegan(Nvl\Csv\ValueObjects\CSVWorkReference $work, Throwable $previous): self
+public function getContext(): array
+@return array<string, mixed>
+public function getContextValue(string $key, mixed $default=null): mixed
+@param string $key
+@param mixed $default
+@return mixed
+public function package(): string
+public function publicContext(): array
+@return array<string, mixed>
+public function responseCode(): ?string
+public function responseHeaders(): array
+@return array<string, string>
+public function suggestedStatus(): int
+public function toArray(): array
+@return array<string, mixed>
+public function translationKey(): ?string
+public function translationParameters(): array
+@return array<string, (scalar | null)>
+public function withContext(array $context): static
+@param array<string, mixed> $context
+@return static
+resolved @return Nvl\Csv\Exceptions\CSVDispatchException
+public readonly Nvl\Csv\ValueObjects\CSVWorkReference $work
 ```
 
 ## Nvl\Csv\Exceptions\CSVException
@@ -748,6 +783,8 @@ public static function invalidType(string $field, mixed $value, string $expected
 @param string $expectedType
 @return self
 resolved @return Nvl\Csv\Exceptions\CSVValidationException
+public static function mappingFailed(int $row, string $field, array $errors): self
+@param array<int, string> $errors
 public static function missingRequiredFields(array $fields): self
 @param array<int, string> $fields
 @return self
@@ -1787,9 +1824,9 @@ resolved @return Nvl\Csv\Validators\CSVFieldValidator
 public static function phone(): self
 @return self
 resolved @return Nvl\Csv\Validators\CSVFieldValidator
-public function range(?float $min=null, ?float $max=null): self
-@param (float | null) $min
-@param (float | null) $max
+public function range(int|float|null $min=null, int|float|null $max=null): self
+@param (int | float | null) $min
+@param (int | float | null) $max
 @return self
 resolved @return Nvl\Csv\Validators\CSVFieldValidator
 public function required(bool $required=true): self
@@ -1910,6 +1947,10 @@ public function withDelimiter(string $delimiter): self
 @param string $delimiter
 @return self
 resolved @return Nvl\Csv\ValueObjects\CSVConfiguration
+public function withEncoding(?string $encoding): self
+@param (string | null) $encoding
+@return self
+resolved @return Nvl\Csv\ValueObjects\CSVConfiguration
 public function withIncludeIndex(bool $includeIndex=true): self
 @param bool $includeIndex
 @return self
@@ -1970,6 +2011,7 @@ resolved @param (Nvl\Csv\Enums\CSVTypeEnum | null) $type
 @param bool $nullable
 @param (string | null) $format
 @param array<string, mixed> $metadata
+@throws InvalidArgumentException
 public function __serialize(): array
 @return array<string, mixed>
 public function __unserialize(array $data): void

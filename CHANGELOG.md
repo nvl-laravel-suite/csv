@@ -5,6 +5,34 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- `CSVTypeEnum::INSTANT` casts an offset-qualified value to UTC RFC 3339 with microseconds (`2026-03-29T00:30:00.123456Z`); values without an explicit offset or zone are rejected. `DATETIME` remains wall time and does not retain an offset.
+- `CSVDispatchException` (with its retained `CSVWorkReference`) when a queued dispatch fails after delivery began, `CSVConfiguration::withEncoding()`, and `CSVValidationException::mappingFailed()`.
+
+### Fixed
+
+- `CsvImporter::batch()` under `stopOnError()` rethrows a failed batch once: it is no longer counted again as a row failure, downgraded to a warning, or resubmitted with the next row.
+- `limit_rows` stops before reading the next record, so a bad row after the requested slice no longer fails or rolls back the import.
+- Queued fluent `mapField()` mappings are applied by the producer before staging: `unique`, `duplicate_strategy`, types and required headers are enforced across all chunks, and workers receive canonical rows.
+- Mapping rejections from the importer carry their source row and field errors (`CSVValidationException::mappingFailed()`), including when raised by queued `processAsync()`. Workers decode staged chunks at JSON depth 512, so deeply nested `ARRAY` cells that staged successfully are delivered.
+- A queued dispatch that fails after delivery began keeps its sealed staged work and throws `CSVDispatchException`; only work that never entered delivery is deleted.
+- `CSVConfiguration(encoding: ...)` passed to the importer constructor or `configure()` is honored, so BOM-less Windows-1251 input is decoded.
+- Optional nullable typed mappings return `null` for empty cells instead of throwing from the cast that validation had accepted.
+- A mapping `format` parses dates strictly with that format in validation and casting.
+- `CSVFieldValidator::range()` and `integer()` compare integer cells with integer bounds exactly, beyond float precision.
+- `DateTransformer` without an input format rejects rollover dates such as `2026-02-31`, sharing the strict parser of `CSVTypeEnum::DATE`.
+- CR-only (`EXCEL_MAC`) exports, and any CR, LF or CRLF line endings, are read back by the importer and analyzer, with line breaks inside quoted fields kept.
+- The analyzer's 10,000-row cap counts empty records.
+- `ARRAY` validation accepts the comma lists that `ARRAY` casting supports.
+- `FLOAT` casting rejects native `INF` and `NAN`.
+- A logical record over 8 MiB is rejected while it is read, and queued chunks are split by their encoded size within the 8 MiB staging bound.
+
+### Changed
+
+- A mapping `format` is accepted only for `DATE`, `DATETIME` and `INSTANT` mappings; other combinations throw `InvalidArgumentException`.
+- The staged work format is version 3; workers no longer re-apply mappings.
+
 ## [7.1.0] - 2026-11-16
 
 ### Highlights

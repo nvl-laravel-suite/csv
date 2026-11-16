@@ -58,27 +58,20 @@ it('rechecks owner admission after waiting for the configured chunk lock', funct
     }
 });
 
-it('reports queued mapping failures as row validation while retaining retry work and owner isolation', function (): void {
+it('reports queued mapping failures before staging inside the owner boundary', function (): void {
     $path = tempnam(sys_get_temp_dir(), 'nvl_csv_');
     file_put_contents($path, "age\nnot-an-integer\n");
     try {
         app(OwnershipRunner::class)->run(Company::findOrFail(7), Actor::findOrFail(1), function () use ($path): void {
-            app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('ownership-rows')
-                ->mapField('age', 'years', CSVFieldMapping::typed('age', 'years', CSVTypeEnum::INTEGER))->processAsync();
-            $payload = json_decode(DB::table('jobs')->sole()->payload, true, flags: JSON_THROW_ON_ERROR);
-            $job = unserialize($payload['data']['command']);
-            try {
-                $job->handle(app(CSVWorkStore::class), app(CSVHandlerRegistry::class));
-                throw new LogicException('Invalid queued row reached its handler.');
-            } catch (CSVValidationException $error) {
-                expect($error->getAffectedRows())->toBe([1])
-                    ->and($error->getRowErrors(1))->toBe(['age' => ["Field 'age' must be of type integer"]]);
-            }
-            $chunk = dirname($job->work->manifestPath).'/chunks/0.json';
-            expect(DB::table('ownership_queue_probes')->where('stage', 'csv-row')->count())->toBe(0)
-                ->and(Storage::disk('local')->exists($chunk))->toBeTrue()
-                ->and(Storage::disk('local')->exists($chunk.'.done'))->toBeFalse()
-                ->and(Storage::disk('local')->exists($job->work->manifestPath))->toBeTrue();
+            expect(fn () => app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('ownership-rows')
+                ->mapField('age', 'years', CSVFieldMapping::typed('age', 'years', CSVTypeEnum::INTEGER))->processAsync())
+                ->toThrow(function (CSVValidationException $error): void {
+                    expect($error->getAffectedRows())->toBe([1])
+                        ->and($error->getRowErrors(1))->toBe(['age' => ["Field 'age' must be of type integer"]]);
+                });
+            expect(DB::table('jobs')->count())->toBe(0)
+                ->and(DB::table('ownership_queue_probes')->where('stage', 'csv-row')->count())->toBe(0)
+                ->and(Storage::disk('local')->allFiles())->toBe([]);
         });
     } finally {
         unlink($path);

@@ -13,11 +13,8 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
-use Nvl\Csv\Enums\CSVTypeEnum;
-use Nvl\Csv\Exceptions\CSVValidationException;
 use Nvl\Csv\Services\CSVHandlerRegistry;
 use Nvl\Csv\Services\CSVWorkStore;
-use Nvl\Csv\ValueObjects\CSVFieldMapping;
 use Nvl\Csv\ValueObjects\CSVWorkReference;
 use Nvl\Support\Config\PackageOptions;
 use Nvl\Support\Facades\PackageLog;
@@ -91,9 +88,7 @@ final class ProcessCSVChunkJob implements OwnershipQueuedJob, ShouldQueue
     {
         $manifest = $workStore->read($this->work, $this->manifestChecksum);
         $chunks = $manifest['chunks'] ?? null;
-        $options = $manifest['options'] ?? null;
-        $mappings = $manifest['mappings'] ?? null;
-        if (! is_array($chunks) || ! is_array($options) || ! is_array($mappings)) {
+        if (! is_array($chunks)) {
             throw new OwnershipViolation('CSV work manifest shape is invalid.');
         }
         $chunk = $chunks[$this->chunkIndex] ?? null;
@@ -113,12 +108,13 @@ final class ProcessCSVChunkJob implements OwnershipQueuedJob, ShouldQueue
         if (! is_string($raw) || strlen($raw) > 8388608 || ! hash_equals($chunk['sha256'], hash('sha256', $raw))) {
             throw new OwnershipViolation('CSV chunk content or checksum is invalid.');
         }
-        $rows = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
+        // Staged cells may be decoded ARRAY values; accept every depth json_encode could stage.
+        $rows = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
         if (! is_array($rows) || count($rows) !== $chunk['rows']) {
             throw new OwnershipViolation('CSV chunk row count is invalid.');
         }
         $handler = $handlers->resolve($this->work->handlerAlias, $this->work->handlerVersion);
-        $fieldMappings = $this->restoreMappings($mappings);
+        // Staged rows are canonical: the producer already applied mappings, types and uniqueness.
         foreach ($rows as $row) {
             if ($this->batch()?->cancelled()) {
                 return;
@@ -132,18 +128,6 @@ final class ProcessCSVChunkJob implements OwnershipQueuedJob, ShouldQueue
                     throw new OwnershipViolation('CSV row fields must be named.');
                 }
                 $data[$key] = $value;
-            }
-            if ($fieldMappings !== []) {
-                $data = [];
-                foreach ($fieldMappings as $source => $mapping) {
-                    $value = $row['data'][$source] ?? $mapping->defaultValue;
-                    if (($options['validate_data'] ?? true) && ! $mapping->validate($value)) {
-                        throw CSVValidationException::rowValidationFailed($row['row_number'], [
-                            $mapping->sourceField => $mapping->getValidationErrors($value),
-                        ]);
-                    }
-                    $data[$mapping->targetField] = $mapping->apply($value);
-                }
             }
             try {
                 $handler->process($data, $row['row_number']);
@@ -159,43 +143,5 @@ final class ProcessCSVChunkJob implements OwnershipQueuedJob, ShouldQueue
             throw new RuntimeException('CSV chunk completion could not be recorded.');
         }
         Storage::disk($this->work->disk)->delete($path);
-    }
-
-    /** @param array<array-key,mixed> $rows
-     * @return array<string,CSVFieldMapping>
-     */
-    private function restoreMappings(array $rows): array
-    {
-        $restored = [];
-        foreach ($rows as $row) {
-            if (! is_array($row) || ! is_string($row['source_field'] ?? null) || ! is_string($row['target_field'] ?? null)
-                || ($row['has_transformer'] ?? false) !== false || ($row['validators_count'] ?? 0) !== 0
-                || ! is_bool($row['required'] ?? null) || ! is_bool($row['unique'] ?? null)
-                || ! is_bool($row['nullable'] ?? null) || ! is_array($row['metadata'] ?? null)
-                || ! is_string($row['format'] ?? null) && ($row['format'] ?? null) !== null) {
-                throw new OwnershipViolation('CSV field mapping is invalid.');
-            }
-            $metadata = [];
-            foreach ($row['metadata'] as $key => $value) {
-                if (! is_string($key)) {
-                    throw new OwnershipViolation('CSV mapping metadata requires named fields.');
-                }
-                $metadata[$key] = $value;
-            }
-            $typeValue = $row['type'] ?? null;
-            $type = is_string($typeValue) ? CSVTypeEnum::tryFrom($typeValue) : null;
-            if ($typeValue !== null && $type === null) {
-                throw new OwnershipViolation('CSV field mapping type is invalid.');
-            }
-            $mapping = new CSVFieldMapping(
-                sourceField: $row['source_field'], targetField: $row['target_field'], type: $type,
-                required: $row['required'], defaultValue: $row['default_value'] ?? null,
-                unique: $row['unique'], nullable: $row['nullable'],
-                format: $row['format'] ?? null, metadata: $metadata,
-            );
-            $restored[$mapping->sourceField] = $mapping;
-        }
-
-        return $restored;
     }
 }

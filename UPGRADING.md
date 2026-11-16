@@ -26,6 +26,18 @@ Failed/cancelled private staging can contain PII and remains available for recov
 
 CSV chunk checksums and completion seals protect staged work and suppress replay after a complete chunk. A retry after a partial handler failure can repeat prior row side effects. Use application idempotency keys or transactions appropriate to the handler's target system. Do not infer exactly-once external effects from the queue batch status.
 
+## Upgrading to the next release
+
+- Drain or finish queued CSV batches before deploying. Staged work is now format version 3 with canonical mapped rows; workers refuse version 2 manifests, and older workers refuse version 3.
+- `CSVAsyncProcessor::processAsync()` throws `CSVDispatchException` when dispatch fails after delivery began, for example when a sync-queue handler fails. The exception's `work` property and previous exception identify the retained staged work; reconcile handler effects before retrying or retiring it. Failures before dispatch still delete the staged work and rethrow the original exception.
+- Queued `mapField()` mappings now run on the producer: duplicate, type and required-header failures are raised by `processAsync()` before anything is staged. A mapping rejection is a `CSVValidationException` with the source row and field errors (`getAffectedRows()`, `getRowErrors()`); it no longer fails a worker job, and no staged work is retained for it.
+- The importer's input encoding has one source: `CSVConfiguration::$encoding`. The constructor, `configure()`, `withOptions(['encoding' => ...])` and `withEncoding()` all set it, and the last call wins; a byte order mark in the file still takes precedence. An encoding name that is not a `CSVEncodingEnum` value (case-insensitive) now throws `CSVConfigurationException` when the importer receives the configuration.
+- `CSVFieldMapping` throws `InvalidArgumentException` for a `format` on a type other than `DATE`, `DATETIME` or `INSTANT`. With a supported type, the format is applied strictly, so cells in another layout fail validation.
+- Empty cells of optional nullable typed mappings become `null` (previously the cast threw).
+- Use `CSVTypeEnum::INSTANT` for offset-qualified timestamps such as PostgreSQL `timestamptz`. `DATETIME` keeps returning wall time (`Y-m-d H:i:s`) and does not apply the offset.
+- `CSVFieldValidator::range()` accepts `int|float` bounds; pass integers to compare integer cells exactly.
+- Logical records over 8 MiB fail with `CSVParseException` in the importer and analyzer.
+
 ## Behaviour corrections after 7.0.1
 
 - `trim_values` (default `true`) now trims data cells as well as headers. Pass `'trim_values' => false` where surrounding whitespace is significant.

@@ -660,3 +660,49 @@ it('lets a host transaction retry a PostgreSQL serialization failure from the im
         ->and(DB::connection()->transactionLevel())->toBe(0)
         ->and(DB::table('csv_retry_rows')->orderBy('name')->pluck('name')->all())->toBe(['Ada', 'Bob', 'Host']);
 });
+
+it('stops after one failed batch without resubmission or double counting', function (): void {
+    $path = $this->temporaryCsv("id\n1\n2\n3\n");
+    $submitted = [];
+    $rowErrors = 0;
+
+    expect(function () use ($path, &$submitted, &$rowErrors): void {
+        CsvImporter::make()
+            ->fromFile($path)
+            ->stopOnError()
+            ->onError(function () use (&$rowErrors): void {
+                $rowErrors++;
+            })
+            ->batch(1, function (array $rows) use (&$submitted): void {
+                $submitted[] = array_column($rows, 'id');
+                throw new RuntimeException('batch write failed');
+            });
+    })->toThrow(RuntimeException::class, 'batch write failed');
+
+    expect($submitted)->toBe([['1']])
+        ->and($rowErrors)->toBe(0);
+});
+
+it('round trips offset-qualified instants through a PostgreSQL timestamptz(6) column', function (): void {
+    if (DB::connection()->getDriverName() !== 'pgsql') {
+        $this->markTestSkipped('Requires PostgreSQL timestamptz.');
+    }
+
+    DB::statement('create temporary table csv_instant_rows (id integer, occurred_at timestamptz(6))');
+    $path = $this->temporaryCsv("id,occurred_at\n1,2026-03-29T03:30:00.123456+03:00\n2,2026-03-29T03:30:00.654321+02:00\n");
+
+    CsvImporter::make()->fromFile($path)
+        ->mapField('id', 'id', CSVFieldMapping::typed('id', 'id', CSVTypeEnum::INTEGER, required: true))
+        ->mapField('occurred_at', 'occurred_at', CSVFieldMapping::typed('occurred_at', 'occurred_at', CSVTypeEnum::INSTANT, required: true))
+        ->processRow(function (array $row): array {
+            DB::table('csv_instant_rows')->insert($row);
+
+            return $row;
+        })->run();
+
+    $stored = DB::table('csv_instant_rows')->orderBy('id')
+        ->selectRaw("to_char(occurred_at at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US') as utc")
+        ->pluck('utc')->all();
+
+    expect($stored)->toBe(['2026-03-29T00:30:00.123456', '2026-03-29T01:30:00.654321']);
+});

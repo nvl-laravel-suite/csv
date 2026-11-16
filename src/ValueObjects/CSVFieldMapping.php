@@ -35,8 +35,10 @@ final readonly class CSVFieldMapping
      * @param  array<int, callable>  $validators  Array of validation functions
      * @param  bool  $unique  Whether values in this field must be unique across rows
      * @param  bool  $nullable  Whether null values are acceptable
-     * @param  string|null  $format  Format string for date/number parsing
+     * @param  string|null  $format  PHP date format for DATE, DATETIME and INSTANT mappings only
      * @param  array<string, mixed>  $metadata  Additional configuration metadata
+     *
+     * @throws InvalidArgumentException When a format is declared for a type that cannot use it
      */
     public function __construct(
         public string $sourceField,                    // CSV column header name
@@ -50,7 +52,17 @@ final readonly class CSVFieldMapping
         public bool $nullable = true,                  // Allow null values
         public ?string $format = null,                 // Parsing format hint
         public array $metadata = [],                   // Extension metadata
-    ) {}
+    ) {
+        self::assertFormatSupported($type, $format);
+    }
+
+    /** A declared format is parsed strictly, so it must belong to a date type. */
+    private static function assertFormatSupported(?CSVTypeEnum $type, ?string $format): void
+    {
+        if ($format !== null && ($format === '' || $type === null || ! $type->acceptsFormat())) {
+            throw new InvalidArgumentException('CSV mapping formats require a date, datetime or instant type.');
+        }
+    }
 
     /** @return array<string,mixed> */
     public function __serialize(): array
@@ -81,6 +93,7 @@ final readonly class CSVFieldMapping
             || ! is_array($data['metadata'] ?? null)) {
             throw new InvalidArgumentException('Serialized CSV field mapping is invalid.');
         }
+        self::assertFormatSupported($type, $format);
         $metadata = [];
         foreach ($data['metadata'] as $key => $value) {
             if (! is_string($key)) {
@@ -174,7 +187,7 @@ final readonly class CSVFieldMapping
      *
      * Executes the transformation in the following order:
      * 1. Apply default value if input is empty
-     * 2. Apply type casting using CSVTypeEnum system
+     * 2. Turn empty input of an optional nullable mapping into null, or apply type casting
      * 3. Apply custom transformer function if configured
      *
      * @param  mixed  $value  Raw input value from CSV
@@ -189,9 +202,11 @@ final readonly class CSVFieldMapping
             return $this->defaultValue;
         }
 
-        // Step 2: Apply type casting and validation
+        // Step 2: Empty optional nullable cells are absent values; others are cast
         if ($this->type !== null) {
-            $value = $this->type->cast($value);
+            $value = $this->isEmpty($value) && ! $this->required && $this->nullable
+                ? null
+                : $this->type->cast($value, $this->format);
         }
 
         // Step 3: Apply custom transformation function
@@ -228,7 +243,7 @@ final readonly class CSVFieldMapping
 
         // Validation 3: Check type compatibility (skip for empty values)
         if ($this->type !== null && ! $this->isEmpty($value)) {
-            if (! $this->type->validate($value)) {
+            if (! $this->type->validate($value, $this->format)) {
                 return false; // Value doesn't match expected type
             }
         }
@@ -296,7 +311,7 @@ final readonly class CSVFieldMapping
 
         // Check type validation (only for non-empty values)
         if ($this->type !== null && ! $this->isEmpty($value)) {
-            if (! $this->type->validate($value)) {
+            if (! $this->type->validate($value, $this->format)) {
                 $errors[] = "Field '{$this->sourceField}' must be of type {$this->type->value}";
             }
         }

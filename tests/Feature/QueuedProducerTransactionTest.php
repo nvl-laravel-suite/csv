@@ -7,8 +7,11 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Contracts\CSVRowHandler;
+use Nvl\Csv\Enums\CSVTypeEnum;
+use Nvl\Csv\Exceptions\CSVDispatchException;
 use Nvl\Csv\Services\CSVAsyncProcessor;
 use Nvl\Csv\Services\CSVHandlerRegistry;
+use Nvl\Csv\ValueObjects\CSVFieldMapping;
 
 /** Observe handler effects independently of database rollback. */
 final class CsvCommittedProducerProbe implements CSVRowHandler
@@ -22,6 +25,39 @@ final class CsvCommittedProducerProbe implements CSVRowHandler
     {
         self::$levels[] = DB::connection(self::$source)->transactionLevel();
     }
+}
+
+/** Apply the first row, then fail inline on the second. */
+final class CsvFailingAfterEffectProbe implements CSVRowHandler
+{
+    /** @var list<string> */
+    public static array $applied = [];
+
+    public function process(array $row, int $rowNumber): void
+    {
+        if ($rowNumber === 2) {
+            throw new RuntimeException('inline handler failed');
+        }
+        self::$applied[] = $row['name'];
+    }
+}
+
+/** Capture the rows a worker delivers. */
+final class CsvCapturingProbe implements CSVRowHandler
+{
+    /** @var list<array<string,mixed>> */
+    public static array $rows = [];
+
+    public function process(array $row, int $rowNumber): void
+    {
+        self::$rows[] = $row;
+    }
+}
+
+/** Define an alternate connection with the selected test driver's settings. */
+function csvProducerConnection(string $name): void
+{
+    config()->set('database.connections.'.$name, config('database.connections.'.DB::getDefaultConnection()));
 }
 
 function csvProducerBatchSchema(?string $connection = null): void
@@ -45,8 +81,12 @@ beforeEach(function (): void {
     Storage::fake('local');
     config(['queue.default' => 'sync', 'queue.connections.sync.after_commit' => false, 'queue.batching.database' => DB::getDefaultConnection()]);
     app(CSVHandlerRegistry::class)->register('committed-probe', CsvCommittedProducerProbe::class);
+    app(CSVHandlerRegistry::class)->register('failing-after-effect', CsvFailingAfterEffectProbe::class);
     CsvCommittedProducerProbe::$source = null;
     CsvCommittedProducerProbe::$levels = [];
+    CsvFailingAfterEffectProbe::$applied = [];
+    app(CSVHandlerRegistry::class)->register('capturing', CsvCapturingProbe::class);
+    CsvCapturingProbe::$rows = [];
 });
 
 afterEach(function (): void {
@@ -72,7 +112,7 @@ it('refuses source producer transactions before staging a batch', function (int 
 
 it('uses the actual nondefault source and batch connections for producer admission', function (string $transactionSource): void {
     $name = 'csv-producer-source';
-    config()->set('database.connections.'.$name, ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+    csvProducerConnection($name);
     if ($transactionSource === 'batch') {
         config()->set('queue.batching.database', $name);
     }
@@ -104,7 +144,7 @@ it('executes sync queue handlers only after the batch metadata root commit', fun
 
 it('does not mistake an unrelated default transaction for the selected source root', function (): void {
     $name = 'csv-selected-source';
-    config()->set('database.connections.'.$name, ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+    csvProducerConnection($name);
     config()->set('queue.batching.database', $name);
     csvProducerBatchSchema($name);
     CsvCommittedProducerProbe::$source = $name;
@@ -121,8 +161,8 @@ it('does not mistake an unrelated default transaction for the selected source ro
 it('refuses an open database-queue connection transaction before staging chunk files', function (): void {
     $source = 'csv-clean-source';
     $queueDb = 'csv-queue-db';
-    config()->set('database.connections.'.$source, ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
-    config()->set('database.connections.'.$queueDb, ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+    csvProducerConnection($source);
+    csvProducerConnection($queueDb);
     config()->set('queue.default', 'database');
     config()->set('queue.connections.database', ['driver' => 'database', 'connection' => $queueDb, 'table' => 'jobs', 'queue' => 'default', 'retry_after' => 90]);
     config()->set('queue.batching.database', $source);
@@ -138,4 +178,41 @@ it('refuses an open database-queue connection transaction before staging chunk f
     }
 
     expect(Storage::disk('local')->allFiles())->toBe([]);
+});
+
+it('retains work when an inline handler fails after an earlier effect', function (): void {
+    csvProducerBatchSchema();
+    $path = $this->temporaryCsv("name\nAda\nBob\n");
+
+    try {
+        app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('failing-after-effect')->processAsync();
+        $this->fail('Expected the inline handler failure to surface.');
+    } catch (CSVDispatchException $exception) {
+        $manifest = $exception->work->manifestPath;
+        expect($exception->getPrevious()?->getMessage())->toBe('inline handler failed')
+            ->and($exception->getContext()['work_id'])->toBe($exception->work->workId)
+            ->and(Storage::disk('local')->exists($manifest))->toBeTrue()
+            ->and(Storage::disk('local')->allFiles(dirname($manifest).'/chunks'))->not->toBe([]);
+    }
+
+    expect(CsvFailingAfterEffectProbe::$applied)->toBe(['Ada'])
+        ->and(DB::transactionLevel())->toBe(0);
+});
+
+it('runs its alternate connections on the selected database driver', function (): void {
+    csvProducerConnection('csv-driver-probe');
+
+    expect(DB::connection('csv-driver-probe')->getDriverName())->toBe(DB::connection()->getDriverName());
+});
+
+it('delivers deeply nested staged array cells to the worker', function (): void {
+    csvProducerBatchSchema();
+    $nested = str_repeat('[', 62).'1'.str_repeat(']', 62);
+    $path = $this->temporaryCsv("tags\n{$nested}\n");
+
+    $batch = app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('capturing')
+        ->mapField('tags', 'tags', CSVFieldMapping::typed('tags', 'tags', CSVTypeEnum::ARRAY))->processAsync();
+
+    expect($batch->fresh()->failedJobs)->toBe(0)
+        ->and(CsvCapturingProbe::$rows)->toBe([['tags' => json_decode($nested, true)]]);
 });

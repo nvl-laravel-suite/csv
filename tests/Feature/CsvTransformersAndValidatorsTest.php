@@ -264,3 +264,18 @@ it('monitors memory without mutating global opcode state', function (): void {
     expect(fn () => $manager->enableAutoCleanup(0))->toThrow(InvalidArgumentException::class);
     expect(fn () => $manager->calculateOptimalChunkSize(0))->toThrow(InvalidArgumentException::class);
 });
+
+it('enforces integer bounds above the floating-point precision boundary', function (): void {
+    $validator = CSVFieldValidator::integer(max: 9007199254740992);
+    $minimum = CSVFieldValidator::integer(min: -9007199254740992);
+
+    expect($validator->validate('9007199254740992'))->toBeTrue()
+        ->and($validator->validate('9007199254740993'))->toBeFalse()
+        ->and($validator->validate(9007199254740993))->toBeFalse()
+        ->and($validator->validate('-9007199254740993'))->toBeTrue()
+        ->and($minimum->validate('-9007199254740993'))->toBeFalse()
+        ->and($minimum->validate('-9007199254740992'))->toBeTrue()
+        ->and((new CSVFieldValidator)->range(max: 9223372036854775807)->validate('92233720368547758070'))->toBeFalse()
+        ->and((new CSVFieldValidator)->range(min: 1, max: 2)->validate('1.5'))->toBeTrue()
+        ->and((new CSVFieldValidator)->range(min: 1, max: 2)->validate('2.5'))->toBeFalse();
+});

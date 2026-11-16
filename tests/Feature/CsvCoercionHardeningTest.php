@@ -64,3 +64,15 @@ it('does not treat a zero cell as empty in field filters', function (): void {
         ->and(CSVFilter::field('quantity')->isEmpty()->passes([]))->toBeTrue()
         ->and(CSVFilter::field('quantity')->isEmpty()->passes(['quantity' => []]))->toBeTrue();
 });
+
+it('rejects rollover dates without an explicit transformer format', function (string $value): void {
+    expect((new DateTransformer)->default('fallback')->transform($value))->toBe('fallback')
+        ->and(CSVTypeEnum::DATE->validate($value))->toBeFalse();
+})->with(['2026-02-31', '2026-04-31', '2026-13-01', '2025-02-29']);
+
+it('rejects native infinite and not-a-number floats', function (float $value): void {
+    expect(CSVTypeEnum::FLOAT->validate($value))->toBeFalse()
+        ->and(fn () => CSVTypeEnum::FLOAT->cast($value))->toThrow(InvalidArgumentException::class)
+        ->and(fn () => CSVTypeEnum::NULLABLE_FLOAT->cast($value))->toThrow(InvalidArgumentException::class)
+        ->and(CSVTypeEnum::FLOAT->cast(1.5))->toBe(1.5);
+})->with(['infinity' => INF, 'negative infinity' => -INF, 'not a number' => NAN]);

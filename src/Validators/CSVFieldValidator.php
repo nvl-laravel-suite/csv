@@ -26,9 +26,9 @@ final class CSVFieldValidator extends CSVValidator
 
     private ?int $maxLength = null;
 
-    private ?float $minValue = null;
+    private int|float|null $minValue = null;
 
-    private ?float $maxValue = null;
+    private int|float|null $maxValue = null;
 
     private ?string $pattern = null;
 
@@ -105,11 +105,13 @@ final class CSVFieldValidator extends CSVValidator
     /**
      * Set numeric range constraints.
      *
-     * @param  float|null  $min  Minimum value
-     * @param  float|null  $max  Maximum value
+     * Integer bounds compare integer cells exactly, including digits beyond float precision.
+     *
+     * @param  int|float|null  $min  Minimum value
+     * @param  int|float|null  $max  Maximum value
      * @return self Validator instance
      */
-    public function range(?float $min = null, ?float $max = null): self
+    public function range(int|float|null $min = null, int|float|null $max = null): self
     {
         if ($min !== null && $max !== null && $min > $max) {
             throw new InvalidArgumentException('Minimum value cannot exceed maximum value.');
@@ -222,14 +224,12 @@ final class CSVFieldValidator extends CSVValidator
 
         // Numeric range validation
         if (is_numeric($value) && ($this->minValue !== null || $this->maxValue !== null)) {
-            $numValue = (float) $value;
-
-            if ($this->minValue !== null && $numValue < $this->minValue) {
+            if ($this->minValue !== null && self::compareNumber($value, $this->minValue) < 0) {
                 $this->addError("Field must be at least {$this->minValue}");
                 $isValid = false;
             }
 
-            if ($this->maxValue !== null && $numValue > $this->maxValue) {
+            if ($this->maxValue !== null && self::compareNumber($value, $this->maxValue) > 0) {
                 $this->addError("Field must not exceed {$this->maxValue}");
                 $isValid = false;
             }
@@ -385,7 +385,7 @@ final class CSVFieldValidator extends CSVValidator
     {
         return (new self)
             ->type(CSVTypeEnum::INTEGER)
-            ->range($min !== null ? (float) $min : null, $max !== null ? (float) $max : null);
+            ->range($min, $max);
     }
 
     /**
@@ -397,5 +397,38 @@ final class CSVFieldValidator extends CSVValidator
     {
         return (new self)
             ->type(CSVTypeEnum::BOOLEAN);
+    }
+
+    /**
+     * Compare a numeric cell with a bound: integer against integer exactly, otherwise as floats.
+     *
+     * @return int -1, 0 or 1 like the spaceship operator
+     */
+    private static function compareNumber(int|float|string $value, int|float $bound): int
+    {
+        $integer = is_int($value) ? (string) $value : self::integerDigits($value);
+        if ($integer === null || ! is_int($bound)) {
+            return (float) $value <=> (float) $bound;
+        }
+
+        $boundDigits = (string) $bound;
+        $negative = str_starts_with($integer, '-');
+        if ($negative !== str_starts_with($boundDigits, '-')) {
+            return $negative ? -1 : 1;
+        }
+
+        $magnitude = strlen($integer) <=> strlen($boundDigits) ?: strcmp($integer, $boundDigits) <=> 0;
+
+        return $negative ? -$magnitude : $magnitude;
+    }
+
+    /** Canonical decimal digits of an integer string of any length, or null for other numbers. */
+    private static function integerDigits(int|float|string $value): ?string
+    {
+        if (! is_string($value) || preg_match('/^\s*([+-]?)0*(\d+?)\s*$/D', $value, $matches) !== 1) {
+            return null;
+        }
+
+        return $matches[1] === '-' && $matches[2] !== '0' ? '-'.$matches[2] : $matches[2];
     }
 }

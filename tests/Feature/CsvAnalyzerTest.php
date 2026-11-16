@@ -210,3 +210,12 @@ it('reports empty files and missing sources accurately', function (): void {
         ->and($result['issues'])->not->toBeEmpty()
         ->and($result['requires_chunking'])->toBeFalse();
 });
+
+it('bounds analysis when sampled records are empty', function (): void {
+    $path = $this->temporaryCsv("id,name\n".str_repeat(",\n", 12000)."1,Ada\n");
+
+    $analysis = (new CsvAnalyzer)->analyze($path);
+
+    expect($analysis['metadata']['analyzed_rows'])->toBe(10000)
+        ->and($analysis['empty_row_count'])->toBe(10000);
+});

@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace Nvl\Csv\Transformers;
 
-use Carbon\Carbon;
-use DateTimeInterface;
 use Exception;
-use Stringable;
+use Nvl\Csv\Support\CSVDateParser;
 
 /**
  * Comprehensive date transformation utilities for CSV data processing.
@@ -216,40 +214,8 @@ final class DateTransformer extends CSVTransformer
         }
 
         try {
-            // Parse date using specified format or intelligent parsing
-            if ($this->inputFormat !== null) {
-                if (! is_scalar($value) && ! $value instanceof Stringable) {
-                    return $this->defaultValue;
-                }
-
-                $format = str_contains($this->inputFormat, '!') || str_contains($this->inputFormat, '|')
-                    ? $this->inputFormat
-                    : '!'.$this->inputFormat;
-                $date = Carbon::createFromFormat($format, (string) $value);
-                $parseErrors = Carbon::getLastErrors();
-                if (
-                    $date === null
-                    || ($parseErrors !== false
-                        && ($parseErrors['warning_count'] > 0 || $parseErrors['error_count'] > 0))
-                ) {
-                    return $this->defaultValue;
-                }
-            } else {
-                if (
-                    ! is_string($value)
-                    && ! is_int($value)
-                    && ! is_float($value)
-                    && ! $value instanceof DateTimeInterface
-                ) {
-                    return $this->defaultValue;
-                }
-
-                if (is_string($value) && Carbon::hasRelativeKeywords($value)) {
-                    return $this->defaultValue;
-                }
-
-                $date = Carbon::parse($value);
-            }
+            // Parse strictly with the specified format or the shared complete-date parser
+            $date = CSVDateParser::parse($value, $this->inputFormat);
 
             if ($this->calculateAge) {
                 return $date->age;

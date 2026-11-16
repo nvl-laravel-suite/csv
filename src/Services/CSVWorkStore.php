@@ -20,6 +20,9 @@ use RuntimeException;
  */
 final readonly class CSVWorkStore
 {
+    /** Version 3 stages canonical mapped rows; workers no longer apply field mappings. */
+    public const int FormatVersion = 3;
+
     public function __construct(private OwnershipContextResolver $context, private OwnershipQueueContext $queue) {}
 
     /** @param array<string,mixed> $manifest */
@@ -100,7 +103,7 @@ final readonly class CSVWorkStore
      */
     private function identity(CSVWorkReference $work, array $manifest): array
     {
-        return ['version' => 2, 'work_id' => $work->workId, 'ownership' => $work->ownership->toArray(),
+        return ['version' => self::FormatVersion, 'work_id' => $work->workId, 'ownership' => $work->ownership->toArray(),
             'handler_alias' => $work->handlerAlias, 'handler_version' => $work->handlerVersion, 'manifest' => $manifest];
     }
 

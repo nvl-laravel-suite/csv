@@ -20,6 +20,7 @@ use Nvl\Ownership\Tests\Fixtures\Company;
 use Nvl\Ownership\Tests\Fixtures\NativeDatabaseSource;
 use Nvl\Support\Ownership\Contracts\OwnershipContext;
 use Nvl\Support\Ownership\Contracts\OwnershipQueueContext;
+use Nvl\Support\Testing\TestServiceHosts;
 
 uses(OwnerScopeTestCase::class);
 
@@ -40,7 +41,7 @@ it('serializes two native deliveries of one admitted chunk before host effects a
         'nvl-csv.locks.store' => 'csv_chunk_race',
         'database.redis.client' => 'phpredis',
         'database.redis.options.prefix' => '',
-        'database.redis.csv_chunks' => ['host' => '127.0.0.1', 'port' => (int) $redisPort, 'database' => 0],
+        'database.redis.csv_chunks' => ['host' => TestServiceHosts::redisHost(), 'port' => (int) $redisPort, 'database' => 0],
         'cache.stores.csv_chunk_race' => ['driver' => 'csv_chunk_race'],
     ]);
     Cache::extend('csv_chunk_race', static fn (Application $app, array $config) => $app->make('cache')->repository(new ObservedChunkRedisStore($app->make('redis'), $directory, $prefix, 'csv_chunks')));

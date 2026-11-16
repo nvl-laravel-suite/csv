@@ -35,6 +35,20 @@ final class CSVValidationException extends CSVException
     }
 
     /**
+     * Create exception for one mapped field of a source row, keeping its messages as the text.
+     *
+     * @param  array<int, string>  $errors  Validation errors for the field
+     */
+    public static function mappingFailed(int $row, string $field, array $errors): self
+    {
+        $exception = new self(implode(', ', $errors));
+        $exception->validationErrors = [$row => [$field => $errors]];
+        $exception->withContext(['row' => $row, 'errors' => [$field => $errors]]);
+
+        return $exception;
+    }
+
+    /**
      * Create exception for row validation failure.
      *
      * @param  int  $row  Row number

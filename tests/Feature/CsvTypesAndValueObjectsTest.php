@@ -358,3 +358,60 @@ it('builds contextual exceptions for every compatibility factory', function (): 
         ->and($validation->getValidationErrors())->toHaveCount(2)
         ->and($rowValidation->getAffectedRows())->toBe([3]);
 });
+
+it('validation and application agree for optional typed cells', function (CSVTypeEnum $type): void {
+    $optional = CSVFieldMapping::typed('cell', 'cell', $type);
+    $required = CSVFieldMapping::typed('cell', 'cell', $type, required: true);
+
+    expect($optional->validate(''))->toBeTrue()
+        ->and($optional->apply(''))->toBeNull()
+        ->and($optional->validate(null))->toBeTrue()
+        ->and($optional->apply(null))->toBeNull()
+        ->and($required->validate(''))->toBeFalse()
+        ->and($required->getValidationErrors(''))->toBe(["Field 'cell' is required"]);
+})->with(CSVTypeEnum::cases());
+
+it('uses declared mapping formats consistently', function (): void {
+    $date = new CSVFieldMapping('born', 'born', CSVTypeEnum::DATE, format: 'd/m/Y');
+    $instant = new CSVFieldMapping('at', 'at', CSVTypeEnum::INSTANT, format: 'd/m/Y H:i P');
+
+    expect($date->validate('03/02/2026'))->toBeTrue()
+        ->and($date->apply('03/02/2026'))->toBe('2026-02-03')
+        ->and($date->validate('2026-02-03'))->toBeFalse()
+        ->and($date->validate('31/02/2026'))->toBeFalse()
+        ->and($date->getValidationErrors('31/02/2026'))->toBe(["Field 'born' must be of type date"])
+        ->and(fn () => $date->apply('31/02/2026'))->toThrow(InvalidArgumentException::class)
+        ->and($instant->apply('03/02/2026 10:15 +02:00'))->toBe('2026-02-03T08:15:00.000000Z')
+        ->and(fn () => new CSVFieldMapping('count', 'count', CSVTypeEnum::INTEGER, format: '0.00'))
+        ->toThrow(InvalidArgumentException::class, 'date, datetime or instant')
+        ->and(fn () => new CSVFieldMapping('name', 'name', format: 'd/m/Y'))
+        ->toThrow(InvalidArgumentException::class, 'date, datetime or instant');
+
+    $path = $this->temporaryCsv("born\n03/02/2026\n31/02/2026\n");
+    $result = CsvImporter::make()->fromFile($path)->mapField('born', 'born', $date)->withTransaction(false)->run();
+
+    expect($result['successful_rows'])->toBe(1)
+        ->and($result['failed_rows'])->toBe(1)
+        ->and($result['errors'][0])->toContain('must be of type date');
+});
+
+it('preserves offset-qualified import instants', function (): void {
+    expect(CSVTypeEnum::INSTANT->cast('2026-03-29T03:30:00+03:00'))->toBe('2026-03-29T00:30:00.000000Z')
+        ->and(CSVTypeEnum::INSTANT->cast('2026-03-29T03:30:00+02:00'))->toBe('2026-03-29T01:30:00.000000Z')
+        ->and(CSVTypeEnum::INSTANT->cast('2026-03-29T03:30:00.123456Z'))->toBe('2026-03-29T03:30:00.123456Z')
+        ->and(CSVTypeEnum::INSTANT->validate('2026-03-29 03:30:00'))->toBeFalse()
+        ->and(fn () => CSVTypeEnum::INSTANT->cast('2026-03-29 03:30:00'))->toThrow(InvalidArgumentException::class, 'offset-qualified')
+        ->and(CSVTypeEnum::DATETIME->cast('2026-03-29T03:30:00+03:00'))->toBe('2026-03-29 03:30:00')
+        ->and(CSVTypeEnum::INSTANT->getPhpType())->toBe('string')
+        ->and(CSVTypeEnum::INSTANT->isNullable())->toBeFalse();
+});
+
+it('validated array mappings accept supported comma lists', function (): void {
+    $mapping = CSVFieldMapping::typed('tags', 'tags', CSVTypeEnum::ARRAY, required: true);
+
+    expect(CSVTypeEnum::ARRAY->validate('a,b'))->toBeTrue()
+        ->and($mapping->validate('a, b'))->toBeTrue()
+        ->and($mapping->apply('a, b'))->toBe(['a', 'b'])
+        ->and($mapping->validate('["a","b"]'))->toBeTrue()
+        ->and($mapping->apply('["a","b"]'))->toBe(['a', 'b']);
+});

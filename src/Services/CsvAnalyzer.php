@@ -12,6 +12,7 @@ use Nvl\Csv\Enums\CSVDataQualityEnum;
 use Nvl\Csv\Enums\CSVDelimiterEnum;
 use Nvl\Csv\Enums\CSVEncodingEnum;
 use Nvl\Csv\Exceptions\CSVFileNotFoundException;
+use Nvl\Csv\Support\CSVRecordReader;
 use RuntimeException;
 
 /**
@@ -32,6 +33,8 @@ final class CsvAnalyzer
 
     /** @var resource|null */
     private $handle = null;
+
+    private ?CSVRecordReader $reader = null;
 
     private string $filePath = '';
 
@@ -246,6 +249,7 @@ final class CsvAnalyzer
             fclose($this->handle);
         }
         $this->handle = null;
+        $this->reader = null;
     }
 
     /**
@@ -400,9 +404,10 @@ final class CsvAnalyzer
             fwrite($stream, $sample);
             rewind($stream);
             $columnCounts = [];
+            $reader = new CSVRecordReader($stream, $delimiter, '"', '');
 
             while (count($columnCounts) < 5) {
-                $row = fgetcsv($stream, 0, $delimiter, '"', '');
+                $row = $reader->read();
                 if ($row === false) {
                     break;
                 }
@@ -453,16 +458,11 @@ final class CsvAnalyzer
                 $this->sampleData[] = $row;
             }
 
-            // Check for empty rows
+            // Check for empty rows, then column consistency
             $nonEmpty = array_filter($row, fn ($v) => $v !== '' && $v !== null);
             if (empty($nonEmpty)) {
                 $this->emptyRowCount++;
-
-                continue;
-            }
-
-            // Check column consistency
-            if (count($row) !== $expectedColumns) {
+            } elseif (count($row) !== $expectedColumns) {
                 $this->inconsistentRowCount++;
                 $this->issues[] = [
                     'severity' => 'warning',
@@ -470,10 +470,13 @@ final class CsvAnalyzer
                 ];
             }
 
-            // Limit analysis for very large files
+            // Limit analysis for very large files, counting empty records too
             if ($this->rowCount >= self::MAX_ANALYSIS_ROWS) {
                 // Estimate total rows
                 $position = is_resource($this->handle) ? ftell($this->handle) : false;
+                if ($position !== false && $this->reader !== null) {
+                    $position -= $this->reader->bufferedBytes();
+                }
                 if ($position !== false && $position > 0) {
                     $percentRead = $position / $this->fileSize;
                     $this->rowCount = (int) ($this->rowCount / $percentRead);
@@ -496,17 +499,11 @@ final class CsvAnalyzer
      */
     private function readHeaders(): void
     {
-        if (! is_resource($this->handle)) {
+        if ($this->reader === null) {
             throw new RuntimeException('File handle is not open');
         }
 
-        $headers = fgetcsv(
-            $this->handle,
-            0,
-            $this->delimiter->getCharacter(),
-            '"',
-            '',
-        );
+        $headers = $this->reader->read();
 
         if ($headers === false) {
             $this->headers = [];
@@ -540,17 +537,7 @@ final class CsvAnalyzer
      */
     private function readRow(): array|false
     {
-        if (! is_resource($this->handle)) {
-            return false;
-        }
-
-        return fgetcsv(
-            $this->handle,
-            0,
-            $this->delimiter->getCharacter(),
-            '"',
-            '',
-        );
+        return $this->reader?->read() ?? false;
     }
 
     /**
@@ -1011,6 +998,8 @@ final class CsvAnalyzer
                 throw new RuntimeException("Unable to convert CSV input from {$sourceEncoding} to UTF-8.");
             }
         }
+
+        $this->reader = new CSVRecordReader($handle, $this->delimiter->getCharacter(), '"', '');
     }
 
     /**

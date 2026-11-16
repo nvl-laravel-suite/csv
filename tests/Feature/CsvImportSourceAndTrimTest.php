@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Enums\CSVEncodingEnum;
+use Nvl\Csv\Exceptions\CSVConfigurationException;
 use Nvl\Csv\Exceptions\CSVFileNotFoundException;
+use Nvl\Csv\Exceptions\CSVParseException;
 use Nvl\Csv\Services\CsvImporter;
+use Nvl\Csv\Support\CSVRecordReader;
+use Nvl\Csv\ValueObjects\CSVConfiguration;
 
 it('trims imported cells when trim_values is enabled and preserves them when it is disabled', function (): void {
     $path = $this->temporaryCsv("id, name\n 1 ,\" Ada \"\n  ,\t\n");
@@ -66,4 +70,39 @@ it('decodes UTF-16 and UTF-32 sources without a byte order mark in the documente
         ->toBe([1 => ['name' => 'André']])
         ->and(iterator_to_array(CsvImporter::make()->withEncoding(CSVEncodingEnum::UTF32)->fromFile($utf32)->stream()))
         ->toBe([1 => ['name' => 'André']]);
+});
+
+it('does not read beyond a requested slice', function (): void {
+    $path = $this->temporaryCsv("id,name\n1,Ada\n2,\xC3\x28\n");
+
+    expect(iterator_to_array(CsvImporter::make()->fromFile($path)->withOptions(['limit_rows' => 1])->stream()))
+        ->toBe([1 => ['id' => '1', 'name' => 'Ada']])
+        ->and(CsvImporter::make()->fromFile($path)->withOptions(['limit_rows' => 1])->run()['successful_rows'])->toBe(1)
+        ->and(CsvImporter::make()->fromFile($path)->withOptions(['limit_rows' => 1])->batch(5, static function (): void {})['successful_rows'])->toBe(1);
+});
+
+it('honors configured Windows-1251 input encoding', function (): void {
+    $path = $this->temporaryCsv(mb_convert_encoding("име,град\nИван,София\n", 'Windows-1251', 'UTF-8'));
+    $configuration = new CSVConfiguration(encoding: 'Windows-1251');
+    $expected = [1 => ['име' => 'Иван', 'град' => 'София']];
+
+    expect(iterator_to_array((new CsvImporter($configuration))->fromFile($path)->stream()))->toBe($expected)
+        ->and(iterator_to_array(CsvImporter::make()->configure($configuration)->fromFile($path)->stream()))->toBe($expected)
+        ->and(CsvImporter::make()->configure($configuration)->getEncoding())->toBe(CSVEncodingEnum::WINDOWS_1251)
+        ->and(CsvImporter::make()->withEncoding(CSVEncodingEnum::WINDOWS_1251)->configure(CSVConfiguration::default())->getEncoding())
+        ->toBe(CSVEncodingEnum::UTF8)
+        ->and(fn () => new CsvImporter(new CSVConfiguration(encoding: 'not-an-encoding')))
+        ->toThrow(CSVConfigurationException::class, 'encoding is invalid');
+});
+
+it('rejects oversized logical records before processing', function (): void {
+    $path = $this->temporaryCsv("id,payload\n1,\"".str_repeat('a', CSVRecordReader::MaxRecordBytes + 1)."\"\n");
+    $processed = 0;
+
+    expect(fn () => CsvImporter::make()->fromFile($path)->processRow(function (array $row) use (&$processed): array {
+        $processed++;
+
+        return $row;
+    })->run())->toThrow(CSVParseException::class, 'logical record exceeds 8388608 bytes')
+        ->and($processed)->toBe(0);
 });

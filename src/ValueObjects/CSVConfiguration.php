@@ -289,6 +289,33 @@ final readonly class CSVConfiguration
     }
 
     /**
+     * Create a new configuration with a different character encoding.
+     *
+     * @param  string|null  $encoding  Encoding name; null selects UTF-8
+     * @return self New configuration instance with modified encoding
+     */
+    public function withEncoding(?string $encoding): self
+    {
+        return new self(
+            delimiter: $this->delimiter,
+            enclosure: $this->enclosure,
+            escape: $this->escape,
+            lineEnding: $this->lineEnding,
+            includeBOM: $this->includeBOM,
+            includeHeaders: $this->includeHeaders,
+            includeIndex: $this->includeIndex,
+            chunkSize: $this->chunkSize,
+            processingMode: $this->processingMode,
+            exportFormat: $this->exportFormat,
+            encoding: $encoding,
+            memoryLimit: $this->memoryLimit,
+            strictMode: $this->strictMode,
+            skipEmptyRows: $this->skipEmptyRows,
+            trimValues: $this->trimValues,
+        );
+    }
+
+    /**
      * Check if this configuration uses streaming processing.
      *
      * Streaming modes process data sequentially with minimal memory usage,

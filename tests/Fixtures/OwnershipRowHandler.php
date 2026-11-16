@@ -6,6 +6,7 @@ namespace Nvl\Csv\Tests\Fixtures;
 
 use Illuminate\Support\Facades\DB;
 use Nvl\Csv\Contracts\CSVRowHandler;
+use Nvl\Csv\Exceptions\CSVValidationException;
 use Nvl\Support\Ownership\Contracts\OwnershipContext;
 
 /** Writes fixture effects using only the worker's admitted owner facts. */
@@ -16,6 +17,9 @@ final readonly class OwnershipRowHandler implements CSVRowHandler
     /** @param array<string,mixed> $row */
     public function process(array $row, int $rowNumber): void
     {
+        if (($row['name'] ?? null) === 'Invalid row') {
+            throw CSVValidationException::rowValidationFailed($rowNumber, ['name' => ['Handler rejected the row.']]);
+        }
         if (($row['name'] ?? null) === 'Retry row' && ! DB::table('ownership_queue_probes')->where('stage', 'csv-retry')->exists()) {
             DB::table('ownership_queue_probes')->insert(['stage' => 'csv-retry', 'owner' => $this->context->requireOwner()->key, 'label' => 'retry']);
             throw new \RuntimeException('Retry this native CSV chunk once.');
