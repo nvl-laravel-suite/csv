@@ -5,9 +5,17 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+## [7.4.1] - 2026-11-17
+
 ### Fixed
 
 - `processAsync()` returns the batch when an inline import applied every row but removing its staged work fails; the cleanup error is reported instead of thrown, so a retry cannot apply the rows twice.
+
+<!-- NVL GENERATED CHANGES START -->
+### Changed
+
+- Dagger image continuation, translations lease release, media JSON adoption, CSV inline cleanup
+<!-- NVL GENERATED CHANGES END -->
 
 ## [7.4.0] - 2026-11-17
 
