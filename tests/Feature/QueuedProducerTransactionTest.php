@@ -2,10 +2,13 @@
 
 declare(strict_types=1);
 
+use Illuminate\Bus\Batch;
 use Illuminate\Bus\Events\BatchDispatched;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Contracts\CSVRowHandler;
@@ -257,4 +260,24 @@ it('removes completed inline work once dispatch returns', function (): void {
 
     expect(CsvCapturingProbe::$rows)->toBe([['name' => 'Ada']])
         ->and(Storage::disk('local')->allFiles())->toBe([]);
+});
+
+it('returns the batch and reports a cleanup failure after an inline import applied every row', function (): void {
+    csvProducerBatchSchema();
+    $path = $this->temporaryCsv("name\nAda\nBob\n");
+    $fake = Storage::disk('local');
+    Storage::set('local', new class($fake->getDriver(), $fake->getAdapter(), $fake->getConfig()) extends FilesystemAdapter
+    {
+        public function deleteDirectory($directory)
+        {
+            throw new RuntimeException('cleanup failed');
+        }
+    });
+    Exceptions::fake();
+
+    $batch = app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('capturing')->processAsync();
+
+    expect($batch)->toBeInstanceOf(Batch::class)
+        ->and(array_column(CsvCapturingProbe::$rows, 'name'))->toBe(['Ada', 'Bob']);
+    Exceptions::assertReported(static fn (RuntimeException $error): bool => $error->getMessage() === 'cleanup failed');
 });

@@ -5,6 +5,10 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- `processAsync()` returns the batch when an inline import applied every row but removing its staged work fails; the cleanup error is reported instead of thrown, so a retry cannot apply the rows twice.
+
 ## [7.4.0] - 2026-11-17
 
 ### Fixed

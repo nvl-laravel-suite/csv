@@ -200,7 +200,12 @@ final class CSVAsyncProcessor
                 throw CSVDispatchException::afterDeliveryBegan($work, $error);
             }
             if (CSVBatchCallbacks::endDispatch($work)) {
-                $this->workStore->delete($work);
+                // Every row is applied; a cleanup failure must not invite a retry that applies them again.
+                try {
+                    $this->workStore->delete($work);
+                } catch (Throwable $error) {
+                    report($error);
+                }
             }
 
             return $dispatched;
