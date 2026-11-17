@@ -5,6 +5,8 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+## [7.4.0] - 2026-11-17
+
 ### Fixed
 
 - Queued staging preserves whole `FLOAT` and `NULLABLE_FLOAT` values, so a worker receives `1.0` rather than `1`.
@@ -14,6 +16,12 @@ All notable changes to `nvl/csv` are documented here.
 - Input that ends inside an unclosed quoted field throws `CSVParseException` during import, streaming, analysis and queued staging instead of folding the remaining lines into one silently accepted record.
 - Formatted `DATE`, `DATETIME` and `INSTANT` values and `DateTransformer` input whose weekday name (`D`, `l`, or `r`) contradicts the written calendar date are rejected instead of being moved to the next matching weekday.
 - `CSVFieldMapping::getValidationErrors()` reports `Field '<name>' failed custom validation` when a custom validator rejects an otherwise valid value, so import row failures and `CSVValidationException` carry a diagnostic.
+
+<!-- NVL GENERATED CHANGES START -->
+### Changed
+
+- consumer-audit fixes across the suite, UTC timestamps, core/forms release ordering
+<!-- NVL GENERATED CHANGES END -->
 
 ## [7.3.0] - 2026-11-17
 
