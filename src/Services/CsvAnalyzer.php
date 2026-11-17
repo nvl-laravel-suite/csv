@@ -12,6 +12,7 @@ use Nvl\Csv\Enums\CSVDataQualityEnum;
 use Nvl\Csv\Enums\CSVDelimiterEnum;
 use Nvl\Csv\Enums\CSVEncodingEnum;
 use Nvl\Csv\Exceptions\CSVFileNotFoundException;
+use Nvl\Csv\Exceptions\CSVParseException;
 use Nvl\Csv\Support\CSVRecordReader;
 use RuntimeException;
 
@@ -407,7 +408,11 @@ final class CsvAnalyzer
             $reader = new CSVRecordReader($stream, $delimiter, '"', '');
 
             while (count($columnCounts) < 5) {
-                $row = $reader->read();
+                try {
+                    $row = $reader->read();
+                } catch (CSVParseException) {
+                    break; // The detection sample may end inside a quoted field; the full read reports real errors
+                }
                 if ($row === false) {
                     break;
                 }

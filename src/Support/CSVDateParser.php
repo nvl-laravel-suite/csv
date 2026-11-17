@@ -41,6 +41,9 @@ final class CSVDateParser
                 throw new InvalidArgumentException('Date value does not match its declared format.');
             }
             self::assertNoParseErrors();
+            if (preg_match('/(?<!\\\\)[Dl]/', $strictFormat) === 1) {
+                self::assertCalendarDatePreserved($date, date_parse_from_format($strictFormat, (string) $value));
+            }
 
             return $date;
         }
@@ -57,6 +60,24 @@ final class CSVDateParser
         self::assertNoParseErrors();
 
         return $date;
+    }
+
+    /**
+     * Reject a parsed date whose calendar day differs from the written one.
+     *
+     * PHP moves a date forward to a parsed weekday name (D or l), so a weekday that contradicts the
+     * written day silently shifts it; such values are contradictory rather than valid.
+     *
+     * @param  array<string, mixed>  $written  Components from date_parse_from_format()
+     */
+    private static function assertCalendarDatePreserved(Carbon $date, array $written): void
+    {
+        $parsed = ['year' => $date->year, 'month' => $date->month, 'day' => $date->day];
+        foreach ($parsed as $component => $parsedValue) {
+            if (is_int($written[$component] ?? null) && $written[$component] !== $parsedValue) {
+                throw new InvalidArgumentException('Date value names a weekday that contradicts its calendar date.');
+            }
+        }
     }
 
     /** Reject the warnings PHP reports for rolled-over or partially parsed dates. */

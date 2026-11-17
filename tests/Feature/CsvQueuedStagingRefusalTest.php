@@ -33,3 +33,12 @@ it('refuses to queue a source without data rows and stages no work', function (s
     expect(Storage::disk('local')->allFiles())->toBe([]);
     Bus::assertNothingDispatched();
 })->with(["id,name\n", "id,name\n,\n\n"]);
+
+it('refuses to queue a source whose final quoted field is never closed', function (): void {
+    $path = $this->temporaryCsv("id,name\n1,\"Ada\n2,Bob\n");
+
+    expect(fn () => app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('rows')->processAsync())
+        ->toThrow(CSVParseException::class, 'unterminated quoted field');
+    expect(Storage::disk('local')->allFiles())->toBe([]);
+    Bus::assertNothingDispatched();
+});

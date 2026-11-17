@@ -406,6 +406,31 @@ it('preserves offset-qualified import instants', function (): void {
         ->and(CSVTypeEnum::INSTANT->isNullable())->toBeFalse();
 });
 
+it('accepts the ISO 8601 date format c as an offset-qualified instant', function (): void {
+    expect(CSVTypeEnum::INSTANT->cast('2026-03-29T03:30:00+03:00', 'c'))->toBe('2026-03-29T00:30:00.000000Z')
+        ->and(CSVTypeEnum::INSTANT->validate('2026-03-29 03:30:00', 'Y-m-d H:i:s'))->toBeFalse();
+});
+
+it('accepts the RFC 2822 date format r as an offset-qualified instant', function (): void {
+    expect(CSVTypeEnum::INSTANT->cast('Sun, 29 Mar 2026 03:30:00 +0300', 'r'))->toBe('2026-03-29T00:30:00.000000Z')
+        ->and(CSVTypeEnum::INSTANT->validate('Sun, 29 Mar 2026 03:30:00 +0300', 'r'))->toBeTrue();
+});
+
+it('rejects formatted dates whose weekday contradicts the calendar date', function (CSVTypeEnum $type, string $value, string $format): void {
+    expect($type->validate($value, $format))->toBeFalse()
+        ->and(fn () => $type->cast($value, $format))->toThrow(InvalidArgumentException::class)
+        ->and((new CSVFieldMapping('at', 'at', $type, format: $format))->getValidationErrors($value))->not->toBe([]);
+})->with([
+    [CSVTypeEnum::INSTANT, 'Mon, 17 Nov 2026 12:00:00 +0200', 'r'],
+    [CSVTypeEnum::DATETIME, 'Mon 2026-11-17 12:00:00', 'D Y-m-d H:i:s'],
+    [CSVTypeEnum::DATE, 'Monday 2026-11-17', 'l Y-m-d'],
+]);
+
+it('accepts formatted dates whose weekday matches the calendar date', function (): void {
+    expect(CSVTypeEnum::INSTANT->cast('Tue, 17 Nov 2026 12:00:00 +0200', 'r'))->toBe('2026-11-17T10:00:00.000000Z')
+        ->and(CSVTypeEnum::DATE->cast('Tuesday 2026-11-17', 'l Y-m-d'))->toBe('2026-11-17');
+});
+
 it('validated array mappings accept supported comma lists', function (): void {
     $mapping = CSVFieldMapping::typed('tags', 'tags', CSVTypeEnum::ARRAY, required: true);
 

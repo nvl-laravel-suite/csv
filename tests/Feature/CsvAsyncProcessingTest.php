@@ -111,7 +111,7 @@ it('stages bounded chunks instead of embedding source rows in jobs', function ()
         expect($pending->jobs)->toHaveCount(2);
         foreach ($pending->jobs as $job) {
             expect($job)->toBeInstanceOf(ProcessCSVChunkJob::class)
-                ->and(serialize($job))->not->toContain('Jane', 'SerializableClosure');
+                ->and(serialize($job))->not->toContain('Jane')->not->toContain('SerializableClosure');
         }
 
         return true;

@@ -269,6 +269,7 @@ enum CSVTypeEnum: string
      */
     private function castToInstant(mixed $value, ?string $format): string
     {
+        $format = $this->expandInstantFormat($format);
         if (! $this->isValidInstant($value, $format)) {
             throw new InvalidArgumentException(
                 'Cannot parse '.$this->describeValue($value).' as an offset-qualified instant.',
@@ -283,9 +284,10 @@ enum CSVTypeEnum: string
      */
     private function isValidInstant(mixed $value, ?string $format): bool
     {
+        $format = $this->expandInstantFormat($format);
         if (! $value instanceof DateTimeInterface) {
             $hasOffset = $format !== null
-                ? preg_match('/(?<!\\\\)[eOPpTU]/', $format) === 1
+                ? preg_match('/(?<!\\\\)[ceOPpTU]/', $format) === 1
                 : is_string($value) && array_key_exists('zone_type', date_parse($value));
             if (! $hasOffset) {
                 return false;
@@ -293,6 +295,14 @@ enum CSVTypeEnum: string
         }
 
         return $this->isValidDate($value, $format);
+    }
+
+    /**
+     * Expand the RFC 2822 format character r, which PHP can format but not parse, to its explicit equivalent.
+     */
+    private function expandInstantFormat(?string $format): ?string
+    {
+        return $format === null ? null : preg_replace('/(?<!\\\\)r/', 'D, d M Y H:i:s O', $format);
     }
 
     /**

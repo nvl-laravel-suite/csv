@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Enums\CSVEncodingEnum;
+use Nvl\Csv\Enums\CSVTypeEnum;
 use Nvl\Csv\Exceptions\CSVConfigurationException;
 use Nvl\Csv\Exceptions\CSVFileNotFoundException;
 use Nvl\Csv\Exceptions\CSVParseException;
 use Nvl\Csv\Services\CsvImporter;
 use Nvl\Csv\Support\CSVRecordReader;
 use Nvl\Csv\ValueObjects\CSVConfiguration;
+use Nvl\Csv\ValueObjects\CSVFieldMapping;
 
 it('trims imported cells when trim_values is enabled and preserves them when it is disabled', function (): void {
     $path = $this->temporaryCsv("id, name\n 1 ,\" Ada \"\n  ,\t\n");
@@ -105,4 +107,39 @@ it('rejects oversized logical records before processing', function (): void {
         return $row;
     })->run())->toThrow(CSVParseException::class, 'logical record exceeds 8388608 bytes')
         ->and($processed)->toBe(0);
+});
+
+it('keeps the selected source when withOptions supplies named field mappings', function (string $selection): void {
+    $path = $this->temporaryCsv("id,name\n1,Ada\n");
+    $mappings = ['field_mappings' => ['name' => CSVFieldMapping::typed('name', 'full_name', CSVTypeEnum::STRING, required: true)]];
+    Storage::fake('imports');
+    Storage::disk('imports')->put('people.csv', "id,name\n7,Bob\n");
+
+    $importer = match ($selection) {
+        'option' => CsvImporter::make()->withOptions(['file_path' => $path] + $mappings),
+        'file' => CsvImporter::make()->fromFile($path)->withOptions($mappings),
+        'disk' => CsvImporter::make()->fromDisk('imports', 'people.csv')->withOptions($mappings),
+    };
+
+    expect(iterator_to_array($importer->stream()))->toBe([1 => [
+        'full_name' => $selection === 'disk' ? 'Bob' : 'Ada',
+    ]]);
+})->with(['option', 'file', 'disk']);
+
+it('rejects a source whose final quoted field is never closed', function (): void {
+    $path = $this->temporaryCsv("id,name\n1,\"Ada\n2,Bob\n");
+
+    expect(fn () => CsvImporter::make()->fromFile($path)->withOptions(['strict_mode' => true])->run())
+        ->toThrow(CSVParseException::class, 'unterminated quoted field');
+    expect(fn () => iterator_to_array(CsvImporter::make()->fromFile($path)->stream()))
+        ->toThrow(CSVParseException::class, 'unterminated quoted field');
+});
+
+it('keeps reading closed multiline quoted fields', function (): void {
+    $path = $this->temporaryCsv("id,name\n1,\"Ada\nLovelace\"\n2,\"Bob \"\"B\"\"\"");
+
+    expect(iterator_to_array(CsvImporter::make()->fromFile($path)->stream()))->toBe([
+        1 => ['id' => '1', 'name' => "Ada\nLovelace"],
+        2 => ['id' => '2', 'name' => 'Bob "B"'],
+    ]);
 });

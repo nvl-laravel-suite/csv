@@ -192,11 +192,18 @@ final class CSVAsyncProcessor
             }
 
             // Once dispatch begins, a handler may already have run (for example on the sync queue).
+            CSVBatchCallbacks::beginDispatch($work);
             try {
-                return $batch->dispatch();
+                $dispatched = $batch->dispatch();
             } catch (Throwable $error) {
+                CSVBatchCallbacks::endDispatch($work);
                 throw CSVDispatchException::afterDeliveryBegan($work, $error);
             }
+            if (CSVBatchCallbacks::endDispatch($work)) {
+                $this->workStore->delete($work);
+            }
+
+            return $dispatched;
         });
     }
 
@@ -247,7 +254,7 @@ final class CSVAsyncProcessor
         try {
             // Rows are staged after the full mapping pipeline: canonical, typed, unique and required-checked.
             foreach ($importer->stream() as $rowNumber => $row) {
-                $encoded = json_encode(['row_number' => $rowNumber, 'data' => $row], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                $encoded = json_encode(['row_number' => $rowNumber, 'data' => $row], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
                 if (strlen($encoded) + 2 > self::ChunkBytes) {
                     throw new OwnershipViolation('CSV row exceeds the private storage bound and cannot be staged.');
                 }

@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Enums\CSVDelimiterEnum;
 use Nvl\Csv\Enums\CSVEncodingEnum;
 use Nvl\Csv\Exceptions\CSVFileNotFoundException;
+use Nvl\Csv\Exceptions\CSVParseException;
 use Nvl\Csv\Services\CsvAnalyzer;
 
 it('rejects invalid local analysis sources before reading without disclosing paths', function (string $method, string $source): void {
@@ -218,4 +219,11 @@ it('bounds analysis when sampled records are empty', function (): void {
 
     expect($analysis['metadata']['analyzed_rows'])->toBe(10000)
         ->and($analysis['empty_row_count'])->toBe(10000);
+});
+
+it('rejects analysis of a source whose final quoted field is never closed', function (): void {
+    $path = $this->temporaryCsv("id,name\n1,\"Ada\n2,Bob\n");
+
+    expect(fn () => (new CsvAnalyzer)->analyze($path))
+        ->toThrow(CSVParseException::class, 'unterminated quoted field');
 });

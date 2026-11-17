@@ -5,6 +5,16 @@ All notable changes to `nvl/csv` are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Queued staging preserves whole `FLOAT` and `NULLABLE_FLOAT` values, so a worker receives `1.0` rather than `1`.
+- Work completed inline during a queued dispatch is removed only after the dispatch returns, so a `CSVDispatchException` raised by a failing `BatchDispatched` listener still references readable staged work.
+- `INSTANT` accepts the ISO 8601 format `c` and the RFC 2822 format `r` as offset-qualified.
+- `withOptions(['field_mappings' => [...]])` no longer replaces the selected file source with the last mapping's field name; the `file_path` option, `fromFile()` and `fromDisk()` sources are kept.
+- Input that ends inside an unclosed quoted field throws `CSVParseException` during import, streaming, analysis and queued staging instead of folding the remaining lines into one silently accepted record.
+- Formatted `DATE`, `DATETIME` and `INSTANT` values and `DateTransformer` input whose weekday name (`D`, `l`, or `r`) contradicts the written calendar date are rejected instead of being moved to the next matching weekday.
+- `CSVFieldMapping::getValidationErrors()` reports `Field '<name>' failed custom validation` when a custom validator rejects an otherwise valid value, so import row failures and `CSVValidationException` carry a diagnostic.
+
 ## [7.3.0] - 2026-11-17
 
 ### Changed

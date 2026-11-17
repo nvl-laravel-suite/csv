@@ -296,11 +296,11 @@ final class CsvImporter
             $this->onConnection(self::stringOption($options, 'connection', ''));
         }
         $this->applyOptionFieldMappings($options);
-        foreach ($fieldMappings as $source => $mapping) {
-            if (! is_string($source) || ! $mapping instanceof CSVFieldMapping) {
+        foreach ($fieldMappings as $sourceField => $mapping) {
+            if (! is_string($sourceField) || ! $mapping instanceof CSVFieldMapping) {
                 throw new CSVConfigurationException('Field mappings require named CSVFieldMapping values.');
             }
-            $this->mapField($source, $mapping->targetField, $mapping);
+            $this->mapField($sourceField, $mapping->targetField, $mapping);
         }
 
         $this->options = $options + array_intersect_key($this->options, ['file_path' => true]);

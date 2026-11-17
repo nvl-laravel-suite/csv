@@ -316,6 +316,17 @@ final readonly class CSVFieldMapping
             }
         }
 
+        // Custom validators only run on values that passed the built-in checks, as in validate()
+        if ($errors === []) {
+            foreach ($this->validators as $validator) {
+                if (! $validator($value)) {
+                    $errors[] = "Field '{$this->sourceField}' failed custom validation";
+
+                    break;
+                }
+            }
+        }
+
         return $errors;
     }
 

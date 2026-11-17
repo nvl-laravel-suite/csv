@@ -37,6 +37,8 @@ CSV chunk checksums and completion seals protect staged work and suppress replay
 - Use `CSVTypeEnum::INSTANT` for offset-qualified timestamps such as PostgreSQL `timestamptz`. `DATETIME` keeps returning wall time (`Y-m-d H:i:s`) and does not apply the offset.
 - `CSVFieldValidator::range()` accepts `int|float` bounds; pass integers to compare integer cells exactly.
 - Logical records over 8 MiB fail with `CSVParseException` in the importer and analyzer.
+- A source that ends inside an unclosed quoted field now fails with `CSVParseException` in the importer, analyzer and `processAsync()` (nothing is staged). Previously the remaining lines were silently folded into one record; repair such files before importing.
+- Formatted dates whose weekday name contradicts the written date (for example `Mon, 17 Nov 2026 12:00:00 +0200` with `r`, a Tuesday) now fail validation instead of being moved to the next matching weekday.
 
 ## Behaviour corrections after 7.0.1
 

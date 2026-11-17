@@ -14,6 +14,6 @@ it('serializes only a captured scalar native work reference', function (): void 
     $job = ProcessCSVChunkJob::fromOwnershipWork($work, 0, $envelope, str_repeat('a', 64));
     $payload = serialize($job);
 
-    expect($payload)->not->toContain('rowProcessor', 'SerializableClosure', 'TenantContext')
+    expect($payload)->not->toContain('rowProcessor')->not->toContain('SerializableClosure')->not->toContain('TenantContext')
         ->and(unserialize($payload))->toBeInstanceOf(ProcessCSVChunkJob::class);
 });

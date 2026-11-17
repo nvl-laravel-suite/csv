@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use Illuminate\Bus\Events\BatchDispatched;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Nvl\Csv\Contracts\CSVRowHandler;
@@ -11,6 +13,7 @@ use Nvl\Csv\Enums\CSVTypeEnum;
 use Nvl\Csv\Exceptions\CSVDispatchException;
 use Nvl\Csv\Services\CSVAsyncProcessor;
 use Nvl\Csv\Services\CSVHandlerRegistry;
+use Nvl\Csv\Services\CSVWorkStore;
 use Nvl\Csv\ValueObjects\CSVFieldMapping;
 
 /** Observe handler effects independently of database rollback. */
@@ -215,4 +218,43 @@ it('delivers deeply nested staged array cells to the worker', function (): void 
 
     expect($batch->fresh()->failedJobs)->toBe(0)
         ->and(CsvCapturingProbe::$rows)->toBe([['tags' => json_decode($nested, true)]]);
+});
+
+it('delivers staged whole floats to the worker as floats', function (CSVTypeEnum $type): void {
+    csvProducerBatchSchema();
+    $path = $this->temporaryCsv("amount\n1.0\n");
+
+    $batch = app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('capturing')
+        ->mapField('amount', 'amount', CSVFieldMapping::typed('amount', 'amount', $type))->processAsync();
+
+    expect($batch->fresh()->failedJobs)->toBe(0)
+        ->and(CsvCapturingProbe::$rows[0]['amount'])->toBe(1.0);
+})->with([CSVTypeEnum::FLOAT, CSVTypeEnum::NULLABLE_FLOAT]);
+
+it('retains completed inline work when a batch dispatched listener fails', function (): void {
+    csvProducerBatchSchema();
+    Event::listen(BatchDispatched::class, static function (): void {
+        throw new RuntimeException('dispatched listener failed');
+    });
+    $path = $this->temporaryCsv("name\nAda\n");
+
+    try {
+        app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('capturing')->processAsync();
+        $this->fail('Expected the dispatched listener failure to surface.');
+    } catch (CSVDispatchException $exception) {
+        expect($exception->getPrevious()?->getMessage())->toBe('dispatched listener failed')
+            ->and(app(CSVWorkStore::class)->read($exception->work))->toHaveKey('chunks');
+    }
+
+    expect(CsvCapturingProbe::$rows)->toBe([['name' => 'Ada']]);
+});
+
+it('removes completed inline work once dispatch returns', function (): void {
+    csvProducerBatchSchema();
+    $path = $this->temporaryCsv("name\nAda\n");
+
+    app(CSVAsyncProcessor::class)->fromFile($path)->usingHandler('capturing')->processAsync();
+
+    expect(CsvCapturingProbe::$rows)->toBe([['name' => 'Ada']])
+        ->and(Storage::disk('local')->allFiles())->toBe([]);
 });

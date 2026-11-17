@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Nvl\Csv\Enums\CSVTypeEnum;
 use Nvl\Csv\Filters\CSVFilter;
+use Nvl\Csv\Services\CsvImporter;
 use Nvl\Csv\Support\CSVMemoryManager;
 use Nvl\Csv\Transformers\CSVTransformer;
 use Nvl\Csv\Transformers\DateTransformer;
@@ -278,4 +279,16 @@ it('enforces integer bounds above the floating-point precision boundary', functi
         ->and((new CSVFieldValidator)->range(max: 9223372036854775807)->validate('92233720368547758070'))->toBeFalse()
         ->and((new CSVFieldValidator)->range(min: 1, max: 2)->validate('1.5'))->toBeTrue()
         ->and((new CSVFieldValidator)->range(min: 1, max: 2)->validate('2.5'))->toBeFalse();
+});
+
+it('reports a diagnostic when a custom validator rejects an otherwise valid cell', function (): void {
+    $mapping = new CSVFieldMapping('name', 'name', CSVTypeEnum::STRING, validators: [fn (mixed $value): bool => false]);
+    $path = $this->temporaryCsv("name\nAda\n");
+
+    $result = CsvImporter::make()->fromFile($path)->mapFields(['name' => $mapping])->run();
+
+    expect($mapping->validate('Ada'))->toBeFalse()
+        ->and($mapping->getValidationErrors('Ada'))->toBe(["Field 'name' failed custom validation"])
+        ->and($result['failed_rows'])->toBe(1)
+        ->and(json_encode($result['errors'], JSON_THROW_ON_ERROR))->toContain('failed custom validation');
 });

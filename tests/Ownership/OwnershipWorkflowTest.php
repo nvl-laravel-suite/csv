@@ -88,7 +88,7 @@ it('stages captured private chunks and keeps status cancellation and manifests i
         });
         $payload = json_decode(DB::table('jobs')->sole()->payload, true, flags: JSON_THROW_ON_ERROR);
         expect($payload['data']['nvl_ownership']['owner']['key'])->toBe('7')
-            ->and($payload['data']['command'])->not->toContain('Private row', 'SerializableClosure');
+            ->and($payload['data']['command'])->not->toContain('Private row')->not->toContain('SerializableClosure');
         $job = unserialize($payload['data']['command']);
         app(OwnershipRunner::class)->run(Company::query()->findOrFail(8), Actor::query()->findOrFail(1), function () use ($batch, $job): void {
             expect(fn () => app(CSVAsyncProcessor::class)->getBatchStatus($batch->id))->toThrow(OwnershipViolation::class);

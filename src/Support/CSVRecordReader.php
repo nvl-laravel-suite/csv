@@ -9,8 +9,8 @@ use Nvl\Csv\Exceptions\CSVParseException;
 /**
  * Reads bounded logical CSV records terminated by CR, LF or CRLF.
  *
- * Line breaks inside an enclosed field belong to the record. Each record is limited while it is
- * read, before the parser allocates its fields, and no global INI setting is changed.
+ * Line breaks inside an enclosed field belong to the record; input that ends inside one is rejected.
+ * Each record is limited while it is read, before the parser allocates its fields, and no global INI setting is changed.
  *
  * @internal
  */
@@ -40,7 +40,7 @@ final class CSVRecordReader
      *
      * @return array<int, string|null>|false
      *
-     * @throws CSVParseException When a logical record exceeds the byte bound
+     * @throws CSVParseException When a logical record exceeds the byte bound or input ends inside a quoted field
      */
     public function read(): array|false
     {
@@ -127,6 +127,9 @@ final class CSVRecordReader
             if ($this->exhausted) {
                 if ($this->position >= $length) {
                     return null;
+                }
+                if ($quoted) {
+                    throw CSVParseException::parsingFailed('unterminated quoted field at end of input');
                 }
                 $record = substr($this->buffer, $this->position);
                 $this->buffer = '';
